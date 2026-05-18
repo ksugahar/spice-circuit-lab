@@ -11,6 +11,7 @@ Tests:
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import pytest
 
 from ltspice_converter.parser.cir_to_schemdraw import cir_string_to_schemdraw
@@ -207,6 +208,43 @@ TEXT 0 100 Left 2 !.tran 1m
     assert n1 == n2, (
         f"component count drifted in round-trip: {n1} -> {n2}\n"
         f"asc2: {asc2}\nnetlist2: {netlist2}"
+    )
+
+
+def test_subckt_body_round_trip():
+    """.subckt body must survive .cir -> .asc -> .cir byte-equal.
+
+    Regression for the C3 fix: previously a `.subckt` block's body
+    components leaked into the top-level component list and were
+    re-emitted as ordinary SYMBOLs outside the block, so the
+    regenerated .asc had an empty `.subckt ... .ends` shell.
+    """
+    src = (
+        Path(__file__).parent / "fixtures" / "bidirectional" /
+        "00_converter_test_subckt_diac.cir"
+    ).read_text(encoding="utf-8")
+    import ltspice_converter as lc
+    asc = lc.netlist_to_asc(src)
+    recovered = lc.asc_to_netlist(asc)
+
+    def subckt_body(text):
+        out = []
+        capturing = False
+        for line in text.split("\n"):
+            ll = line.strip().lower()
+            if ll.startswith(".subckt mydiac"):
+                capturing = True
+            if capturing:
+                out.append(line.strip())
+                if ll.startswith(".ends"):
+                    break
+        return out
+
+    src_body = subckt_body(src)
+    recovered_body = subckt_body(recovered)
+    assert src_body == recovered_body, (
+        f"subckt body drifted:\n  src:       {src_body}\n"
+        f"  recovered: {recovered_body}"
     )
 
 

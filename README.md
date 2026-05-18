@@ -172,6 +172,40 @@ Exposes four tools: `netlist_to_schemdraw`, `schemdraw_to_netlist`,
 
 `.ac`, `.tran`, `.op`, `.dc` directives are preserved through the round-trip.
 
+## `.subckt` round-trip
+
+The converter preserves an entire `.subckt` block --- header, body
+components, models, `.param`s, comments, and `.ends` line --- byte
+for byte. This means a netlist file like:
+
+```spice
+* myckt with a diac model
+V1 in 0 SINE(0 230 50)
+X1 in 0 mydiac
+.tran 20m
+
+.subckt mydiac T1 T2
+* simplified DIAC: two opposing zeners
+.model BD D Bv=30
+D1 T1 T2 BD
+D2 T2 T1 BD
+.ends mydiac
+.end
+```
+
+round-trips through `ltspice-convert` cleanly:
+
+```bash
+ltspice-convert myckt.cir -o myckt.asc      # write LTspice schematic
+ltspice-convert myckt.asc -o back.cir       # extract back
+diff myckt.cir back.cir                     # node names may rename;
+                                            # the .subckt block is byte-equal
+```
+
+The same holds for `ltspice-convert --check myckt.cir`: any drift
+inside the subckt body would show up as `component count drift` or a
+parser warning.
+
 ## Performance
 
 Current `.asc → netlist → .asc` round-trip pass rate on real-world

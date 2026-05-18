@@ -205,12 +205,47 @@ def cmd_convert(args) -> int:
                              asy_search_dirs=args.asy_dir)
             write_text(out_path, result, tgt_fmt)
             print(f'{inp} -> {out_path}  ({len(result)} bytes)')
+
+            # B5: surface silent drops to stderr. The NetlistParser
+            # would otherwise quietly discard malformed lines.
+            _warn_unparsed_lines(inp, src_text, src_fmt, args)
         except Exception as e:
             print(f'error: {inp}: {type(e).__name__}: {e}', file=sys.stderr)
             if args.traceback:
                 traceback.print_exc()
             errors += 1
     return 1 if errors else 0
+
+
+def _warn_unparsed_lines(inp: Path, src_text: str, src_fmt: str, args) -> None:
+    """B5: emit stderr warnings for lines the parser silently dropped.
+
+    For .cir input, run NetlistParser and check `unparsed_lines`.
+    For .asc input, extract the netlist first then check the same.
+    For .py input, skip — schemdraw script semantics are too loose.
+    """
+    if src_fmt == 'py':
+        return
+    try:
+        from .parser.netlist_to_asc import NetlistParser
+        if src_fmt == 'asc':
+            ap = AscParser(
+                asy_search_dirs=[Path(d) for d in args.asy_dir] or None
+            )
+            ap.parse_string(src_text)
+            netlist_text = NetlistExtractor(ap).extract()
+        else:  # cir
+            netlist_text = src_text
+        np_parser = NetlistParser()
+        np_parser.parse_string(netlist_text)
+        for lno, line in np_parser.unparsed_lines:
+            msg = _format_unparsed_line(lno, line)
+            print(f'warning: {inp.name}: {msg}', file=sys.stderr)
+    except Exception:
+        # B5 is best-effort; do not let a parse failure here mask
+        # the successful primary conversion.
+        if args.traceback:
+            traceback.print_exc()
 
 
 # =============================================================================
