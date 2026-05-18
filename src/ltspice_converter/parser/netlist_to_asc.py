@@ -142,6 +142,9 @@ class NetlistParser:
         self.components = []
         self.directives = []
         self.title = ''
+        # Lines the parser could not classify (unknown prefix or malformed).
+        # Kept as (1-based line number, original text) for B4 lint reporting.
+        self.unparsed_lines: List[Tuple[int, str]] = []
 
         # `* @sym=<kind>` hint preceding a component restores the original
         # LTspice SYMBOL kind (ind2, schottky, pnp, polcap, ...).
@@ -246,6 +249,11 @@ class NetlistParser:
                 if pending_symbol_hint:
                     comp.symbol_hint = pending_symbol_hint
                 self.components.append(comp)
+            else:
+                # Line did not match any known SPICE element class.
+                # Remember it so the CLI can surface "what got skipped"
+                # to the user instead of silently dropping it.
+                self.unparsed_lines.append((i + 1, line))
             pending_symbol_hint = ''
 
         return self

@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] — 2026-05-19
+
+### Distribution
+
+- **GitHub-only release.** PyPI publish workflow removed
+  (`.github/workflows/release.yml` deleted). README install
+  instructions switched to:
+
+      pip install git+https://github.com/ksugahar/ltspice-converter
+
+  Pin a release with `@v0.3.5`. Editable dev install unchanged
+  (`pip install -e .[mcp,test]`).
+
+### Added (C5: strict lint checks)
+
+`ltspice-convert --check` now also runs static netlist analysis on
+the input and reports:
+
+- **Duplicate instance names** (e.g. two `R1`s at top level).
+- **Floating nodes** (a node touched by only one component, usually a
+  wiring mistake).
+- **Orphan `.model` directives** (a model declared inline but never
+  referenced by any device).
+- **Undefined model references** (a device references a model name
+  that no inline `.model` defines; tone-downed to skip well-known
+  LTspice library models like `1N4148`, `2N3904`, etc.).
+- **Undefined `{PARAM}` references** (`{Rval}` used without a matching
+  `.param Rval=...`).
+
+These are warnings; `--strict` promotes any of them to exit 1, which
+makes the CLI a real lint gate for CI pipelines.
+
+### Added (B4: actionable error messages)
+
+- NetlistParser now tracks lines it could not classify in a new
+  `unparsed_lines` attribute (1-based line numbers + original text).
+- `--check` surfaces each unparsed line as a warning, with a "did
+  you mean ...?" hint for common typos
+  (`Resistor` -> `res (R<name> ...)`, etc.) and a generic SPICE
+  prefix reminder for unrecognised first characters. Prevents silent
+  drops on user-written netlists where a token like `Zorg foo bar`
+  used to vanish without trace.
+
+### Tests
+
+8 new CLI tests covering all five C5 checks + B4 unparsed-line
+surfacing + suggestion path. 55 tests total (up from 47); CI matrix
+unchanged.
+
 ## [0.3.4] — 2026-05-19
 
 ### Added

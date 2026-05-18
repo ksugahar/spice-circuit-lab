@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import traceback
 from collections import Counter
@@ -240,6 +241,248 @@ def _gnd_pin_positions(netlist: str) -> dict:
     return out
 
 
+# =============================================================================
+# Static checks (C5)
+# =============================================================================
+
+_SUBCKT_RE = re.compile(r'^\s*\.subckt\s+', re.IGNORECASE)
+_ENDS_RE   = re.compile(r'^\s*\.ends\b', re.IGNORECASE)
+_MODEL_RE  = re.compile(r'^\s*\.model\s+(\S+)\s+(\S+)', re.IGNORECASE)
+_PARAM_RE  = re.compile(r'^\s*\.param\b(.*)$', re.IGNORECASE)
+_REF_RE    = re.compile(r'\{([^{}]+)\}')  # `{R1+10k}` -> 'R1+10k'
+
+
+def _split_top_level_lines(netlist: str) -> List[str]:
+    """Return only TOP-LEVEL netlist lines, dropping `.subckt ... .ends`
+    bodies and comments. Used by static checks so symbols inside a
+    subckt do not pollute top-level duplicate / floating analyses.
+    """
+    out = []
+    in_subckt = 0
+    for line in netlist.split('\n'):
+        if _SUBCKT_RE.match(line):
+            in_subckt += 1
+            continue
+        if _ENDS_RE.match(line):
+            in_subckt = max(0, in_subckt - 1)
+            continue
+        if in_subckt:
+            continue
+        s = line.strip()
+        if not s or s.startswith('*'):
+            continue
+        out.append(s)
+    return out
+
+
+def _component_lines(lines: List[str]) -> List[Tuple[str, List[str]]]:
+    """Return [(name, tokens-after-name)] for component lines (R/C/L/V/I/...).
+    Excludes directives and the title.
+    """
+    out = []
+    for line in lines:
+        if line.startswith('.'):
+            continue
+        parts = line.split()
+        if parts and parts[0][0].isalpha() and parts[0][0].upper() in 'RCLVIDQMJXEFGHBSTUKA':
+            out.append((parts[0], parts[1:]))
+    return out
+
+
+def static_checks(netlist: str) -> List[str]:
+    """Return a list of warning strings from static netlist analysis.
+
+    Checks:
+      1. Duplicate instance names (R1 appearing twice at top level).
+      2. Floating nodes (a node that only one component touches).
+      3. Orphan .model directives (no component references the model).
+      4. Undefined model references (component lists model that no
+         .model defines -- often inside .lib/.include, so just a warning).
+      5. Undefined .param references (`{NAME}` token without a .param NAME=).
+    """
+    warnings: List[str] = []
+    top = _split_top_level_lines(netlist)
+    comps = _component_lines(top)
+
+    # --- 1. Duplicate instance names ---
+    seen: Counter = Counter(c[0] for c in comps)
+    dups = [n for n, k in seen.items() if k > 1]
+    if dups:
+        warnings.append(
+            f'duplicate instance name(s): {", ".join(sorted(dups)[:5])}'
+            + (' ...' if len(dups) > 5 else '')
+        )
+
+    # --- 2. Floating nodes (only 1 component touching a non-GND node) ---
+    # Heuristic: collect tokens that look like node names from positions
+    # 1..K of each component line. Identifying which tokens are nodes vs
+    # model names is fragile across SPICE dialects, so use a conservative
+    # rule: any token that another component also names is a node (we
+    # are not trying to be a full parser here).
+    node_touches: Counter = Counter()
+    for name, rest in comps:
+        # Number of "node positions" is element-class-dependent:
+        # R/C/L/V/I/D: 2, BJT/MOSFET/JFET: 3 (substrate ignored), X: variable.
+        cls = name[0].upper()
+        if cls in 'RCLVID':
+            ks = rest[:2]
+        elif cls in 'QM':
+            ks = rest[:3] if len(rest) >= 3 else rest
+        elif cls == 'J':
+            ks = rest[:3] if len(rest) >= 3 else rest
+        elif cls == 'X':
+            # subckt: last token is model name, rest are nodes
+            ks = rest[:-1] if len(rest) >= 2 else rest
+        elif cls == 'U':
+            # opamp: 3-pin (no model) or 5-pin (last token is model)
+            if len(rest) == 3:
+                ks = rest
+            elif len(rest) >= 5:
+                ks = rest[:-1]
+            else:
+                ks = rest
+        else:
+            ks = rest[:2]  # conservative
+        for tok in ks:
+            node_touches[tok] += 1
+    floating = [
+        n for n, k in node_touches.items()
+        if k == 1 and n != '0' and n.lower() != 'gnd'
+        # Reject obvious non-nodes (model names, values with units)
+        and not n[0].isdigit()
+        and '{' not in n
+    ]
+    if floating:
+        warnings.append(
+            f'floating node(s) (only one connection): {", ".join(sorted(floating)[:5])}'
+            + (' ...' if len(floating) > 5 else '')
+        )
+
+    # --- 3 & 4. Model declared/used cross-reference ---
+    defined_models = set()
+    for line in netlist.split('\n'):
+        m = _MODEL_RE.match(line)
+        if m:
+            defined_models.add(m.group(1))
+    referenced_models = set()
+    for name, rest in comps:
+        cls = name[0].upper()
+        if cls in 'DQMJX' and rest:
+            # Diode / BJT / MOSFET / JFET / subckt: last token is model
+            referenced_models.add(rest[-1])
+    orphan_defs = defined_models - referenced_models
+    undefined_refs = referenced_models - defined_models
+    if orphan_defs:
+        warnings.append(
+            f'.model declared but never used: {", ".join(sorted(orphan_defs)[:5])}'
+            + (' ...' if len(orphan_defs) > 5 else '')
+        )
+    # Tone down undefined-ref warning: many circuits rely on .lib/.include
+    # which the parser does not chase. Only flag if the name does NOT
+    # look like a known LTspice standard model.
+    suspicious_undef = [
+        m for m in undefined_refs
+        if not _looks_like_standard_model(m)
+    ]
+    if suspicious_undef:
+        warnings.append(
+            f'model(s) referenced but not defined inline '
+            f'(.lib/.include not chased): {", ".join(sorted(suspicious_undef)[:5])}'
+            + (' ...' if len(suspicious_undef) > 5 else '')
+        )
+
+    # --- 5. {PARAM} references without .param ---
+    defined_params = set()
+    for line in netlist.split('\n'):
+        m = _PARAM_RE.match(line)
+        if m:
+            # ".param A=1 B=2" -> A, B
+            for assign in m.group(1).split():
+                if '=' in assign:
+                    defined_params.add(assign.split('=', 1)[0].strip())
+    referenced_params = set()
+    for line in top:
+        for ref in _REF_RE.findall(line):
+            # Pull out identifiers from `{A+B*2-C}`
+            for tok in re.findall(r'[A-Za-z_][A-Za-z0-9_]*', ref):
+                # Filter out function names + numeric units
+                if tok.lower() in ('exp', 'log', 'log10', 'sin', 'cos', 'tan',
+                                    'abs', 'sqrt', 'pwr', 'min', 'max',
+                                    'pi', 'e', 'time', 'temp', 'tnom',
+                                    'k', 'm', 'meg', 'g', 'u', 'n', 'p', 'f'):
+                    continue
+                referenced_params.add(tok)
+    undefined_params = referenced_params - defined_params
+    if undefined_params:
+        warnings.append(
+            f'parameter(s) referenced without .param definition: '
+            f'{", ".join(sorted(undefined_params)[:5])}'
+            + (' ...' if len(undefined_params) > 5 else '')
+        )
+
+    return warnings
+
+
+# Conservative list of LTspice-bundled model names that commonly appear
+# without an inline .model directive (they live in standard.dio/bjt/
+# etc.). Used to suppress false-positive "undefined model" warnings.
+_KNOWN_STANDARD_MODELS = {
+    'd', 'd1n4148', 'd1n4001', 'd1n4007', 'd1n5400', 'd1n5817',
+    '1n4148', '1n4001', '1n4007', '1n5400', '1n5817',
+    'npn', 'pnp', 'nmos', 'pmos', 'njf', 'pjf', 'nigbt',
+    'q2n2222', 'q2n3904', 'q2n3906', '2n2222', '2n3904', '2n3906',
+    'mn', 'mp', 'irf540', 'irfp250', 'irf9540',
+    'sw', 'ld1117', 'lm317',
+}
+
+
+def _format_unparsed_line(lno: int, line: str) -> str:
+    """B4: format an unparsed-line warning with a 'did you mean?' hint
+    when the user's first token resembles a known SPICE prefix.
+    """
+    import difflib
+    parts = line.strip().split()
+    if not parts:
+        return f'line {lno}: empty (unexpected)'
+    first = parts[0]
+    head = first[0].upper() if first else ''
+    # Known SPICE prefixes
+    known_prefixes = list('RCLVIDQMJXEFGHBSTUKA')
+    suggestions = difflib.get_close_matches(head, known_prefixes, n=1, cutoff=0.0)
+    # Common typo dictionary (whole-word, case-insensitive)
+    typo_map = {
+        'resistor': 'res (R<name> n1 n2 value)',
+        'capacitor': 'cap (C<name> n1 n2 value)',
+        'inductor': 'ind (L<name> n1 n2 value)',
+        'voltage': 'voltage source (V<name> n+ n- value)',
+        'current': 'current source (I<name> n+ n- value)',
+        'diode': 'diode (D<name> anode cathode model)',
+        'transistor': 'BJT (Q<name> C B E model) / MOSFET (M<name> D G S B model)',
+        'subckt': 'X<name> n1 n2 ... subckt_name (note: subckt invocations start with X)',
+    }
+    hint = typo_map.get(first.lower())
+    if hint:
+        return (f'line {lno}: unrecognised element {first!r} '
+                f'(did you mean: {hint}?)')
+    if suggestions and suggestions[0] != head:
+        return (f'line {lno}: unrecognised element {first!r} '
+                f'(SPICE elements start with one of '
+                f'R/C/L/V/I/D/Q/M/J/X/...)')
+    return f'line {lno}: unrecognised element {first!r}'
+
+
+def _looks_like_standard_model(name: str) -> bool:
+    n = name.lower().strip('"\'')
+    if n in _KNOWN_STANDARD_MODELS:
+        return True
+    # Most LTspice/SPICE bundled models follow vendor prefixes
+    for pref in ('lt', 'lm', 'ad', 'op', 'tl', 'ne', 'ma', 'irf', 'irfp',
+                 '1n', '2n', 'bav', 'bat', 'bzx', 'fet', 'd1n', 'q2n'):
+        if n.startswith(pref):
+            return True
+    return False
+
+
 def _check_one(path: Path, asy_search_dirs: List[str]) -> Tuple[List[str], List[str]]:
     """Return (info_msgs, warning_msgs) for path."""
     info: List[str] = []
@@ -306,10 +549,21 @@ def _check_one(path: Path, asy_search_dirs: List[str]) -> Tuple[List[str], List[
         else:
             info.append('GND-pin positions preserved on common components')
 
+        # C5: static netlist checks on the extracted netlist
+        for w in static_checks(nl1):
+            warn.append(w)
+
     elif src_fmt == 'cir':
         n1 = _count_components(src_text)
         info.append(f'netlist: {n1} components')
-        from .parser.netlist_to_asc import NetlistToAsc
+        from .parser.netlist_to_asc import NetlistToAsc, NetlistParser
+        # B4: surface unparsed lines from NetlistParser (silent drops
+        # are the #1 cause of bug reports that we cannot reproduce).
+        np_parser = NetlistParser()
+        np_parser.parse_string(src_text)
+        for lno, line in np_parser.unparsed_lines:
+            warn.append(_format_unparsed_line(lno, line))
+
         asc = NetlistToAsc(asy_search_dirs=asy_search_dirs).convert_string(src_text)
         ap = AscParser(asy_search_dirs=[Path(d) for d in asy_search_dirs] or None)
         ap.parse_string(asc)
@@ -318,6 +572,9 @@ def _check_one(path: Path, asy_search_dirs: List[str]) -> Tuple[List[str], List[
         info.append(f'netlist -> asc -> netlist: {n2} components')
         if n1 != n2:
             warn.append(f'component count drift: {n1} -> {n2}')
+        # C5: static checks on the source netlist
+        for w in static_checks(src_text):
+            warn.append(w)
 
     else:  # py
         # Just compile-check the script

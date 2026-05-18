@@ -26,7 +26,14 @@ git clone https://github.com/ksugahar/ltspice-converter
 cd ltspice-converter
 python -m venv .venv
 . .venv/Scripts/activate          # or `source .venv/bin/activate` on Linux/Mac
-pip install -e .[mcp,test]
+pip install -e ".[mcp,test]"
+```
+
+This project is distributed via GitHub only (no PyPI release). End
+users install with:
+
+```bash
+pip install git+https://github.com/ksugahar/ltspice-converter
 ```
 
 Verify the install:

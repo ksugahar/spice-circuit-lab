@@ -12,14 +12,31 @@ schematic and netlist forms without launching LTspice.
 
 ## Install
 
+The package is distributed from GitHub (no PyPI release). Install
+directly with pip:
+
 ```bash
-pip install ltspice-converter
+pip install git+https://github.com/ksugahar/ltspice-converter
 ```
 
 For MCP server support (Claude Code, Cursor, etc.):
 
 ```bash
-pip install ltspice-converter[mcp]
+pip install "ltspice-converter[mcp] @ git+https://github.com/ksugahar/ltspice-converter"
+```
+
+Pinning a specific version:
+
+```bash
+pip install git+https://github.com/ksugahar/ltspice-converter@v0.3.4
+```
+
+For development:
+
+```bash
+git clone https://github.com/ksugahar/ltspice-converter
+cd ltspice-converter
+pip install -e .[test,mcp]
 ```
 
 ## Python API
@@ -81,6 +98,19 @@ ltspice-convert --check input.asc
 
 ltspice-convert --check --strict *.asc        # exit 1 if any warning
 ```
+
+Static netlist checks `--check` runs (in addition to round-trip):
+
+- Duplicate instance names (`R1` appearing twice at top level)
+- Floating nodes (only one component touches it -- usually a wire
+  the user forgot to finish)
+- Orphan `.model` declarations (model defined but never referenced)
+- Undefined model references (device names a model that is not
+  defined inline; standard library names like `1N4148`, `2N3904`,
+  `LT1001`, ... are exempt)
+- `{PARAM}` references without a matching `.param NAME=...`
+- Lines the parser could not classify (with a "did you mean ...?"
+  hint for common typos like `Resistor` / `Capacitor`)
 
 ### Info / stats
 

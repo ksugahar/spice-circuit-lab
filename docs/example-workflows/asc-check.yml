@@ -33,7 +33,7 @@ jobs:
       - name: Install ltspice-converter
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ltspice-converter
+          python -m pip install git+https://github.com/ksugahar/ltspice-converter
 
       # Optional: vendor `.asy` libraries you ship in your own repo.
       # Multiple paths are joined with `;` on Windows, `:` on Linux.
