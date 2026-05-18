@@ -57,6 +57,7 @@ class Component:
     node_ctrl2: str = ''         # 制御端子- (ctrl-) — 4端子素子用
     node_out: str = ''           # 出力端子 — 5端子opamp用
     raw_line: str = ''           # 元のネットリスト行
+    symbol_hint: str = ''        # 元の LTspice SYMBOL kind (ind2, schottky, pnp, ...)
 
 
 @dataclass
@@ -141,6 +142,10 @@ class NetlistParser:
         self.directives = []
         self.title = ''
 
+        # `* @sym=<kind>` hint preceding a component restores the original
+        # LTspice SYMBOL kind (ind2, schottky, pnp, polcap, ...).
+        pending_symbol_hint = ''
+
         for i, line in enumerate(lines):
             line = line.strip()
             if not line:
@@ -153,8 +158,10 @@ class NetlistParser:
                     self.title = line
                     continue
 
-            # コメント行
+            # コメント行 (@sym=... hint だけ拾う)
             if line.startswith('*'):
+                if '@sym=' in line:
+                    pending_symbol_hint = line.split('@sym=', 1)[1].strip()
                 continue
 
             # インラインコメント除去
@@ -182,9 +189,12 @@ class NetlistParser:
             if line[0].upper() == 'U':
                 comp = self._parse_u_statement(line)
                 if comp:
+                    if pending_symbol_hint:
+                        comp.symbol_hint = pending_symbol_hint
                     self.components.append(comp)
                 else:
                     self.directives.append(SpiceDirective(text=line))
+                pending_symbol_hint = ''
                 continue
 
             # J文が3パーツ = ジャンパー（2端子短絡）→ ゼロ抵抗として扱う
@@ -199,16 +209,21 @@ class NetlistParser:
                     value='0', raw_line=line,
                 )
                 self.components.append(comp)
+                pending_symbol_hint = ''
                 continue
             # J文が4パーツ以下で3以外 = ディレクティブとして扱う
             if line[0].upper() == 'J' and len(parts_check) < 5:
                 self.directives.append(SpiceDirective(text=line))
+                pending_symbol_hint = ''
                 continue
 
             # コンポーネント行をパース
             comp = self._parse_component_line(line)
             if comp:
+                if pending_symbol_hint:
+                    comp.symbol_hint = pending_symbol_hint
                 self.components.append(comp)
+            pending_symbol_hint = ''
 
         return self
 
@@ -1281,25 +1296,33 @@ class AscGenerator:
                 self.lines.append(f'SYMATTR SpiceModel {comp.value}')
             return
 
+        # `* @sym=<kind>` hint takes priority for any class — restores
+        # variants like ind2, schottky, polcap, pnp, npn3, etc.
+        if comp.symbol_hint:
+            sym_name = comp.symbol_hint
+
         # PNP/PMOS/PJF 判定: モデル名に "pnp"/"pmos"/"pjf" が含まれるか、
         # または名前のプレフィックスから推定
-        if comp.comp_type == ComponentType.BJT:
+        # NOTE: when symbol_hint is set, trust it and skip the model-name
+        # heuristic (which is lossy by definition).
+        if comp.comp_type == ComponentType.BJT and not comp.symbol_hint:
             val_lower = (comp.value or '').lower()
             if 'pnp' in val_lower or comp.name.upper().startswith('QP'):
                 sym_name = 'pnp'
-        elif comp.comp_type == ComponentType.MOSFET:
+        elif comp.comp_type == ComponentType.MOSFET and not comp.symbol_hint:
             val_lower = (comp.value or '').lower()
             if 'pmos' in val_lower or 'pch' in val_lower:
                 sym_name = 'pmos'
-        elif comp.comp_type == ComponentType.JFET:
+        elif comp.comp_type == ComponentType.JFET and not comp.symbol_hint:
             val_lower = (comp.value or '').lower()
             if 'pjf' in val_lower:
                 sym_name = 'pjf'
-        elif comp.comp_type == ComponentType.OPAMP:
+        elif comp.comp_type == ComponentType.OPAMP and not comp.symbol_hint:
             val_lower = (comp.value or '').lower()
             sym_name = self.OPAMP_SYMBOL_MAP.get(
                 val_lower, 'Opamps\\\\UniversalOpamp2')
-        elif comp.comp_type in (ComponentType.VCVS, ComponentType.VCCS):
+        elif (comp.comp_type in (ComponentType.VCVS, ComponentType.VCCS)
+                and not comp.symbol_hint):
             # E/G without control terminals → use bv/bi (2-pin behavioral)
             # to avoid floating nc_ pins on the 4-pin g/e symbol
             if not comp.node_ctrl:

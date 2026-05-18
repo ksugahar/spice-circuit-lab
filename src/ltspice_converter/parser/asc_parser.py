@@ -962,10 +962,30 @@ class NetlistExtractor:
         lines = []
         lines.append('* Extracted from ASC')
 
+        # Standard LTspice symbol_type per SPICE class. If the actual symbol
+        # is something else (ind2, schottky, pnp, polcap, npn3, ...), emit a
+        # hint comment so NetlistToAsc can restore the original SYMBOL kind.
+        _DEFAULT_SYM_BY_PREFIX = {
+            'R': {'res'}, 'C': {'cap'}, 'L': {'ind'},
+            'V': {'voltage'}, 'I': {'current'},
+            'D': {'diode'},
+            'Q': {'npn'}, 'M': {'nmos'}, 'J': {'njf'},
+            'E': {'e', 'e2'}, 'G': {'g', 'g2'}, 'F': {'f'}, 'H': {'h'},
+            'B': {'bv', 'bi', 'bi2'}, 'S': {'sw'}, 'T': {'tline'},
+        }
         for sym in self.asc.symbols:
             spice_line = self._symbol_to_spice(sym)
-            if spice_line:
-                lines.append(spice_line)
+            if not spice_line:
+                continue
+            lines.append(spice_line)
+            # Emit hint when symbol_type is non-default for its SPICE class.
+            first = spice_line.lstrip()[:1].upper()
+            sym_type = (sym.symbol_type or '').lower()
+            defaults = _DEFAULT_SYM_BY_PREFIX.get(first, set())
+            if sym_type and sym_type not in defaults and first != 'X':
+                # Avoid leaking proprietary names: only emit the bare symbol
+                # type string, no path or model.
+                lines.append(f'* @sym={sym.symbol_type}')
 
         # Step 5: ディレクティブ (Improvement B & E)
         # TEXT directives in .asc use literal \n as line separator.

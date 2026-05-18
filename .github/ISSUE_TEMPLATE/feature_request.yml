@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest a new conversion target, supported element, or API improvement
+title: "[FEATURE] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: motivation
+    attributes:
+      label: What are you trying to do?
+      description: |
+        Describe the use case. Examples:
+        - "I want to convert a Verilog-A subcircuit reference to schemdraw."
+        - "I need to preserve `.step param` directives through the round-trip."
+        - "Support reading LTspice 24's new SYMBOL syntax."
+    validations:
+      required: true
+
+  - type: textarea
+    id: example
+    attributes:
+      label: Example input/output (if applicable)
+      description: A small snippet of `.asc` / `.cir` / schemdraw script showing what should work.
+      render: text
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      description: Workarounds, related tools, or "I tried X but it didn't fit because Y".

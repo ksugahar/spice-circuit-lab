@@ -94,6 +94,10 @@ corpora (component count preserved):
 | Textbook circuits (training-adjacent) | 100% |
 | GitHub repos (unseen)            | 98%  |
 
+The schemdraw round-trip `netlist → schemdraw script → netlist` runs
+at 80–100% on the same corpus (lower because schemdraw's element
+library is smaller than LTspice's symbol library).
+
 See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for methodology, the
 schemdraw arm, and known failure modes.  Pass rate is not perfect —
 file a [GitHub issue](https://github.com/ksugahar/ltspice-converter/issues)

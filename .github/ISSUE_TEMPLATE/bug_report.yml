@@ -1,0 +1,75 @@
+name: Bug report
+description: Report a circuit that the converter mishandles (drops components, breaks topology, raises an exception, ...)
+title: "[BUG] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping make the converter better. The most useful
+        bug reports include a **minimal failing .asc or .cir**.
+
+        If the file contains anything you cannot share publicly
+        (vendor-proprietary models, NDA material, your circuit IP)
+        please redact it down to the smallest example that still fails.
+
+  - type: textarea
+    id: failing_circuit
+    attributes:
+      label: Failing circuit (.asc or .cir text)
+      description: Paste the file content. If it's binary (UTF-16 LE), please attach it.
+      render: text
+    validations:
+      required: true
+
+  - type: dropdown
+    id: which_conversion
+    attributes:
+      label: Which conversion direction fails?
+      multiple: true
+      options:
+        - asc -> netlist (asc_to_netlist)
+        - netlist -> asc (netlist_to_asc)
+        - netlist -> schemdraw script (netlist_to_schemdraw)
+        - schemdraw script -> netlist (schemdraw_to_netlist)
+        - round-trip (any of the above pair)
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What did you expect the converter to produce?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What did it actually produce (full stdout, traceback, or the wrong output)?
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: ltspice-converter version
+      description: Output of `pip show ltspice-converter | grep Version` or commit SHA.
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: "3.12.x"
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Anything else (LTspice version, OS, schemdraw version, etc.)

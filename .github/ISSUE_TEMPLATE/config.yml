@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/ksugahar/ltspice-converter#readme
+    about: README and API reference
+  - name: Benchmark methodology
+    url: https://github.com/ksugahar/ltspice-converter/blob/main/docs/BENCHMARKS.md
+    about: How pass rate is measured and known weaknesses
