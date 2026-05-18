@@ -67,21 +67,34 @@ in `circuit_db_<book>.json`:
 The `.cir` files themselves stay LAB-private (publisher copyright) and
 live under `<mcp-server>/circuit/textbook/circuits_<book>/`.
 
-### Round-trip pass rate (28 textbook circuits, 2026-05-19)
+### Round-trip pass rate (28 textbook circuits)
 
-| Book | Entries | PASS (clean) | PASS (with warn) | FAIL |
-|---|---:|---:|---:|---:|
-| MATLAB で学ぶ                | 17 | 16 (94.1%) | 1 | 0 |
-| Python で学ぶ (新版)         | 11 | 10 (90.9%) | 1 | 0 |
-| **All textbook circuits**    | **28** | **26 (92.9%)** | **2** | **0** |
-| **Combined pass (any)**      |        |               | **100.0%** | |
+| Book | Entries | PASS (clean) | PASS (with warn) | FAIL | Date |
+|---|---:|---:|---:|---:|---|
+| MATLAB で学ぶ                | 17 | 16 (94.1%) | 1 | 0 | 2026-05-19 v0.3.6 |
+| Python で学ぶ (新版)         | 11 | 10 (90.9%) | 1 | 0 | 2026-05-19 v0.3.6 |
+| **All textbook circuits**    | **28** | **26 (92.9%)** | **2** | **0** | 2026-05-19 v0.3.6 |
+| MATLAB で学ぶ                | 17 | **17 (100%)** | 0 | 0 | 2026-05-19 **v0.3.7** |
+| Python で学ぶ (新版)         | 11 | **11 (100%)** | 0 | 0 | 2026-05-19 **v0.3.7** |
+| **All textbook circuits**    | **28** | **28 (100%)** | **0** | **0** | 2026-05-19 **v0.3.7** |
 
-The two PASS-with-warn cases are both copies of the same `.SUBCKT INV`
-CMOS-inverter example and share a known C5 false-positive
-(X-subckt-invocation flagged as undefined `.model`; subckt-internal
-`.model` flagged as orphan) — both fixes are tracked in the
-`lint_findings_for_converter[]` section of the LAB-private DB JSON
-and will land in a future C5 patch.
+The two previously-warned cases (both `.SUBCKT INV` CMOS-inverter
+copies) were cleared in v0.3.7 by fixing two C5 lint false-positives:
+
+- **C5-fp-1**: `X<name> ... <subckt_name>` (subcircuit invocation)
+  was being looked up against the `.model` table.  X-class refs now
+  resolve against `.subckt` definitions instead.
+- **C5-fp-2**: `.model` declarations inside a `.subckt ... .ends`
+  body were flagged as orphans because the orphan check scanned the
+  whole netlist while the reference check only saw top-level
+  components.  Both passes are now top-level-only, so subckt-internal
+  models stay in scope where they belong.
+
+Three new pytest regression tests
+(`test_check_x_subckt_invocation_not_treated_as_model_ref`,
+`test_check_model_inside_subckt_not_flagged_as_orphan`,
+`test_check_undefined_subckt_warning_when_truly_missing`) lock the
+fix in place.
 
 ## Headline results — v0.3.1 (after C2: `.asy` lookup + isolation zone)
 

@@ -283,6 +283,7 @@ def _gnd_pin_positions(netlist: str) -> dict:
 _SUBCKT_RE = re.compile(r'^\s*\.subckt\s+', re.IGNORECASE)
 _ENDS_RE   = re.compile(r'^\s*\.ends\b', re.IGNORECASE)
 _MODEL_RE  = re.compile(r'^\s*\.model\s+(\S+)\s+(\S+)', re.IGNORECASE)
+_SUBCKT_NAME_RE = re.compile(r'^\s*\.subckt\s+(\S+)', re.IGNORECASE)
 _PARAM_RE  = re.compile(r'^\s*\.param\b(.*)$', re.IGNORECASE)
 _REF_RE    = re.compile(r'\{([^{}]+)\}')  # `{R1+10k}` -> 'R1+10k'
 
@@ -393,30 +394,66 @@ def static_checks(netlist: str) -> List[str]:
             + (' ...' if len(floating) > 5 else '')
         )
 
-    # --- 3 & 4. Model declared/used cross-reference ---
+    # --- 3 & 4. Model / subcircuit declared-vs-used cross-reference ---
+    #
+    # Two separate namespaces. SPICE rules:
+    #   - D / Q / M / J components reference a `.model <name> <type>`
+    #     definition (built-in device-level model).
+    #   - X components are SUBCKT INVOCATIONS: their last token names
+    #     a `.subckt <name> ...` block, NOT a .model.
+    #
+    # `.model` and `.subckt` MUST be checked separately or X-class
+    # invocations get falsely flagged as "undefined .model" (the
+    # historical C5-fp-1) and subckt-internal .model declarations get
+    # falsely flagged as "never used" (C5-fp-2).
+    #
+    # Scope: only TOP-LEVEL .model declarations count for the orphan
+    # check. .model lines inside a `.subckt ... .ends` body have local
+    # scope -- they are referenced by components defined inside that
+    # same body, which `comps` (top-level only) deliberately does not
+    # see. Counting them would always produce false orphans.
     defined_models = set()
-    for line in netlist.split('\n'):
+    for line in top:
         m = _MODEL_RE.match(line)
         if m:
             defined_models.add(m.group(1))
+    defined_subckts = set()
+    for line in netlist.split('\n'):  # .subckt headers are findable anywhere
+        m = _SUBCKT_NAME_RE.match(line)
+        if m:
+            defined_subckts.add(m.group(1))
+
     referenced_models = set()
+    referenced_subckts = set()
     for name, rest in comps:
         cls = name[0].upper()
-        if cls in 'DQMJX' and rest:
-            # Diode / BJT / MOSFET / JFET / subckt: last token is model
+        if not rest:
+            continue
+        if cls == 'X':
+            referenced_subckts.add(rest[-1])
+        elif cls in 'DQMJ':
             referenced_models.add(rest[-1])
-    orphan_defs = defined_models - referenced_models
-    undefined_refs = referenced_models - defined_models
-    if orphan_defs:
+
+    orphan_models = defined_models - referenced_models
+    orphan_subckts = defined_subckts - referenced_subckts
+    undefined_models = referenced_models - defined_models
+    undefined_subckts = referenced_subckts - defined_subckts
+
+    if orphan_models:
         warnings.append(
-            f'.model declared but never used: {", ".join(sorted(orphan_defs)[:5])}'
-            + (' ...' if len(orphan_defs) > 5 else '')
+            f'.model declared but never used: {", ".join(sorted(orphan_models)[:5])}'
+            + (' ...' if len(orphan_models) > 5 else '')
         )
-    # Tone down undefined-ref warning: many circuits rely on .lib/.include
-    # which the parser does not chase. Only flag if the name does NOT
-    # look like a known LTspice standard model.
+    if orphan_subckts:
+        warnings.append(
+            f'.subckt declared but never used: {", ".join(sorted(orphan_subckts)[:5])}'
+            + (' ...' if len(orphan_subckts) > 5 else '')
+        )
+    # Tone down undefined-model warning: many circuits rely on
+    # .lib/.include which the parser does not chase. Only flag if the
+    # name does NOT look like a known LTspice standard model.
     suspicious_undef = [
-        m for m in undefined_refs
+        m for m in undefined_models
         if not _looks_like_standard_model(m)
     ]
     if suspicious_undef:
@@ -424,6 +461,12 @@ def static_checks(netlist: str) -> List[str]:
             f'model(s) referenced but not defined inline '
             f'(.lib/.include not chased): {", ".join(sorted(suspicious_undef)[:5])}'
             + (' ...' if len(suspicious_undef) > 5 else '')
+        )
+    if undefined_subckts:
+        warnings.append(
+            f'subckt(s) referenced but not defined inline '
+            f'(.lib/.include not chased): {", ".join(sorted(undefined_subckts)[:5])}'
+            + (' ...' if len(undefined_subckts) > 5 else '')
         )
 
     # --- 5. {PARAM} references without .param ---

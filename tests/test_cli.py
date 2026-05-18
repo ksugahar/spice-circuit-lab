@@ -264,3 +264,86 @@ def test_check_typo_suggestion(tmp_path):
                      "* typo test\nR1 in out 1k\nZorg foo bar\n.end\n")
     r = run_cli("--check", str(cir))
     assert "Zorg" in r.stdout
+
+
+# =============================================================================
+# C5 false-positive fixes (regression tests)
+# =============================================================================
+
+def test_check_x_subckt_invocation_not_treated_as_model_ref(tmp_path):
+    """C5-fp-1: X<name> ... <subckt_name> must look up `.subckt`, not `.model`.
+
+    Before v0.3.7 the lint pooled X-class refs into `referenced_models`
+    along with D/Q/M/J, so a perfectly valid X1 invocation produced a
+    spurious 'model INV referenced but not defined inline' warning.
+    """
+    cir = _write_cir(
+        tmp_path, "xsubckt.cir",
+        "* X invocation must NOT trigger a model-undefined warning\n"
+        ".SUBCKT INV 1 2 3\n"
+        "R1 1 2 1k\n"
+        "R2 2 3 1k\n"
+        ".ENDS INV\n"
+        "V1 3 0 5\n"
+        "X1 OUT 2 3 INV\n"
+        "RL OUT 0 100k\n"
+        ".op\n"
+        ".end\n"
+    )
+    r = run_cli("--check", str(cir))
+    # No warning about INV being an undefined model.
+    assert "INV" not in r.stdout.split("model")[-1].split("\n")[0] \
+        if "model(s) referenced" in r.stdout else True, \
+        f"X-subckt INV was wrongly flagged: {r.stdout}"
+    # And we should not see the bare 'INV referenced' warning either.
+    assert "INV" not in [
+        w.strip()
+        for line in r.stdout.split("\n")
+        for w in (line.split(":", 1)[-1].split(",") if "referenced" in line else [])
+    ], f"INV mentioned as undefined: {r.stdout}"
+
+
+def test_check_model_inside_subckt_not_flagged_as_orphan(tmp_path):
+    """C5-fp-2: .model defined inside a .subckt body has local scope.
+
+    Before v0.3.7 the orphan-model check scanned the WHOLE netlist for
+    .model declarations but only the top-level components for refs,
+    so subckt-internal .model lines were flagged as 'never used'.
+    """
+    cir = _write_cir(
+        tmp_path, "subckt_model.cir",
+        "* .model inside .subckt body must NOT be flagged as orphan\n"
+        ".SUBCKT INV 1 2 3\n"
+        "M1 1 2 0 0 NCH1 W=4u L=6u\n"
+        "M2 1 2 3 3 PCH1 W=4u L=6u\n"
+        ".model NCH1 NMOS Level=1 Kp=20u Vto=0.7\n"
+        ".model PCH1 PMOS Level=1 Kp=10u Vto=-0.7\n"
+        ".ENDS INV\n"
+        "V1 3 0 5\n"
+        "X1 OUT 2 3 INV\n"
+        "RL OUT 0 100k\n"
+        ".op\n"
+        ".end\n"
+    )
+    r = run_cli("--check", str(cir))
+    # No "never used" warning for NCH1/PCH1 (they are used inside the subckt body).
+    assert "never used" not in r.stdout, \
+        f"subckt-internal .model wrongly flagged: {r.stdout}"
+
+
+def test_check_undefined_subckt_warning_when_truly_missing(tmp_path):
+    """Positive test for the new subckt-undefined check.
+
+    When an X invocation names a subckt that has no .subckt definition
+    AND does not look like a standard library part, we should warn.
+    """
+    cir = _write_cir(
+        tmp_path, "missing_subckt.cir",
+        "* X invokes a subckt that is not defined inline\n"
+        "V1 in 0 5\n"
+        "X1 in out MY_CUSTOM_BLOCK\n"
+        ".end\n"
+    )
+    r = run_cli("--check", str(cir))
+    assert "MY_CUSTOM_BLOCK" in r.stdout, \
+        f"expected missing subckt to be reported, got: {r.stdout}"

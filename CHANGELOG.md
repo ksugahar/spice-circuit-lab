@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.7] — 2026-05-19
+
+### Fixed (C5 false-positives, subckt-related)
+
+Two warnings emitted by `ltspice-convert --check` on perfectly valid
+SUBCKT-using netlists are eliminated:
+
+- **C5-fp-1**: `X<name> ... <subckt_name>` was previously pooled into
+  the same `referenced_models` set as D/Q/M/J components, so the
+  subckt name `INV` (or any other) showed up as "referenced but not
+  defined inline".  X-class refs now have their own
+  `referenced_subckts` set and are checked against `.subckt`
+  definitions.  Two new warning paths are added (orphan `.subckt`,
+  undefined `.subckt` reference) so the same diagnostic quality
+  applies to subcircuits as it does to models.
+- **C5-fp-2**: `.model` declarations inside a `.subckt ... .ends`
+  body were scanned by the orphan check while the matching device
+  references inside that body were not (they live inside an absorbed
+  multi-line directive, invisible to the top-level component list).
+  Result: every subckt-internal `.model` looked like an orphan.  The
+  orphan-model scan is now restricted to **top-level** `.model`
+  lines, matching the scope of the reference scan.
+
+Textbook training-data corpus moves from 26/28 clean pass to
+**28/28 clean pass** as a direct consequence (the two SUBCKT INV
+copies were the only entries with warnings).
+
+### Added
+
+- 3 pytest regression tests covering both fixes plus a positive test
+  for the new "undefined .subckt" warning path.
+
 ## [0.3.6] — 2026-05-19
 
 ### Added (B5: silent-drop warnings in convert mode)
