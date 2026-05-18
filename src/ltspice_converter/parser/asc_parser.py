@@ -1253,6 +1253,14 @@ class NetlistExtractor:
             new_name = f'{prefix}§{name}'
             self._name_remap[name] = new_name
             name = new_name
+        # Unknown vendor symbol → X-prefix (subcircuit invocation). Preserves
+        # the symbol type as the model name so the round-trip can re-emit it.
+        elif (prefix == 'X'
+                and name and name[0].isalpha()
+                and name[0].upper() != 'X'):
+            new_name = f'X§{name}'
+            self._name_remap[name] = new_name
+            name = new_name
         value = sym.value or ''
         model = sym.spice_model or value
 
@@ -1345,6 +1353,13 @@ class NetlistExtractor:
             elif sym.symbol_type in ('sw',):
                 return f'{name} {node1} {node2} {model}'.strip()
             else:
+                # Unknown 2-terminal symbol: preserve symbol_type as model so
+                # the round-trip back to .asc can emit the right SYMBOL line.
+                # X-prefixed name already signals a subcircuit invocation
+                # (see name-remap above).
+                if name and name[0].upper() == 'X':
+                    sub_model = sym.spice_model or sym.symbol_type
+                    return f'{name} {node1} {node2} {sub_model}'.strip()
                 return f'{name} {node1} {node2} {value}'.strip()
 
         return None

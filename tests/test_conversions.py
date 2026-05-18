@@ -170,6 +170,46 @@ def test_route_a_equals_route_b(name, cir, tmp_path, monkeypatch):
         f"{name}: route A and route B disagree structurally"
 
 
+def test_unknown_vendor_symbol_preserved():
+    """Regression: vendor-specific SYMBOL (e.g. ISO16750-2) must survive
+    a .asc -> netlist -> .asc round-trip. Previously such symbols were
+    silently dropped because the extractor produced a 2-token U-statement
+    with no model name, which NetlistParser rejected.
+    """
+    # Hand-crafted minimal vendor-symbol .asc -- same shape as real
+    # LTspice vendor templates but no proprietary content.
+    asc = """Version 4
+SHEET 1 880 680
+WIRE 128 -64 128 -96
+WIRE 128 48 128 16
+FLAG 128 48 0
+SYMBOL ACME_PROPRIETARY_BLOCK 128 -64 R0
+SYMATTR InstName U1
+SYMBOL ACME_PROPRIETARY_BLOCK 256 -64 R0
+SYMATTR InstName U2
+TEXT 0 100 Left 2 !.tran 1m
+"""
+    parser = AscParser()
+    parser.parse_string(asc)
+    netlist = NetlistExtractor(parser).extract()
+    # Both vendor symbols must appear in the netlist with the model name
+    assert "ACME_PROPRIETARY_BLOCK" in netlist.lower() or "acme_proprietary_block" in netlist.lower()
+
+    n1 = _count_components(netlist)
+    assert n1 == 2, f"expected 2 components, got {n1}: {netlist!r}"
+
+    # Round-trip back to .asc
+    asc2 = NetlistToAsc().convert_string(netlist)
+    parser2 = AscParser()
+    parser2.parse_string(asc2)
+    netlist2 = NetlistExtractor(parser2).extract()
+    n2 = _count_components(netlist2)
+    assert n1 == n2, (
+        f"component count drifted in round-trip: {n1} -> {n2}\n"
+        f"asc2: {asc2}\nnetlist2: {netlist2}"
+    )
+
+
 def test_top_level_api_smoke():
     """Public API smoke test."""
     import ltspice_converter as lc

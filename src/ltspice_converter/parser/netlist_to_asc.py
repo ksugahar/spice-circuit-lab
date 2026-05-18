@@ -1264,6 +1264,23 @@ class AscGenerator:
         comp = pc.component
         sym_name = self.SYMBOL_MAP.get(comp.comp_type, 'res')
 
+        # SUBCIRCUIT (X-class, including unknown vendor symbols): emit the
+        # original symbol name so a round-trip preserves the SYMBOL line.
+        # The netlist's X§<name> prefix is the asc_parser convention for
+        # "this was a vendor symbol whose InstName did not start with X";
+        # strip it so the InstName reads correctly in the new .asc.
+        if comp.comp_type == ComponentType.SUBCIRCUIT:
+            inst_name = comp.name
+            if inst_name.startswith('X§'):
+                inst_name = inst_name[2:]
+            sym_name = comp.value or 'res'
+            self.lines.append(f'SYMBOL {sym_name} {pc.x} {pc.y} {pc.rotation}')
+            self.lines.append(f'SYMATTR InstName {inst_name}')
+            if comp.value:
+                # Preserve the model name for re-extraction.
+                self.lines.append(f'SYMATTR SpiceModel {comp.value}')
+            return
+
         # PNP/PMOS/PJF 判定: モデル名に "pnp"/"pmos"/"pjf" が含まれるか、
         # または名前のプレフィックスから推定
         if comp.comp_type == ComponentType.BJT:

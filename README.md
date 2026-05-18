@@ -82,6 +82,23 @@ Exposes four tools: `netlist_to_schemdraw`, `schemdraw_to_netlist`,
 
 `.ac`, `.tran`, `.op`, `.dc` directives are preserved through the round-trip.
 
+## Performance
+
+Current `.asc → netlist → .asc` round-trip pass rate on real-world
+corpora (component count preserved):
+
+| Source | Pass rate (100 samples) |
+|---|---|
+| LTspice "Applications" examples | 100% |
+| LTspice "Examples" examples     | 99%  |
+| Textbook circuits (training-adjacent) | 100% |
+| GitHub repos (unseen)            | 98%  |
+
+See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for methodology, the
+schemdraw arm, and known failure modes.  Pass rate is not perfect —
+file a [GitHub issue](https://github.com/ksugahar/ltspice-converter/issues)
+with a failing `.asc` and we'll fix it.
+
 ## Project history & scope
 
 This package is the successor to the (now-private)
