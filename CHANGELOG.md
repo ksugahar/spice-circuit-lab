@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6] — 2026-05-19
+
+### Added (B5: silent-drop warnings in convert mode)
+
+`ltspice-convert <input> -o <output>` now runs the converted netlist
+through NetlistParser and prints any unparsed line to stderr with the
+same "did you mean ...?" hint that `--check` already used. Previously
+a malformed line was dropped silently from the output and the user had
+to diff source and target to notice. Exit code is unchanged
+(`convert` still succeeds when the primary output is written; the
+warning is informational).
+
+### Added (Doc: `.subckt` round-trip example)
+
+README's *`.subckt` round-trip* section shows a small DIAC subckt
+that round-trips byte-equal in both directions, with a one-line
+`diff` command for verification. A matching fixture
+(`tests/fixtures/bidirectional/00_converter_test_subckt_diac.cir`)
+plus `test_subckt_body_round_trip` locks the C3 (v0.3.3) fix in
+place: any future regression that drops `.subckt` internals will fail
+this test before it can ship.
+
 ## [0.3.5] — 2026-05-19
 
 ### Distribution
