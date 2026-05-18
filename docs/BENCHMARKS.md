@@ -37,6 +37,23 @@ upper bound.
 The script is `bench/baseline.py` (gitignored; depends on a
 LAB-private corpus path).
 
+## Headline results — v0.3.0 (after B1 partial)
+
+`B1` — extend `Component` with `extra_nodes: List[str]` and propagate all
+pin connections through NetlistParser → AscGenerator. AscGenerator now
+emits a compact 4×5 grid of `FLAG + WIRE` lines around each multi-pin
+SUBCIRCUIT, preserving the full pin list in the regenerated `.asc`.
+
+Result: count preservation unchanged (99.25%); GND-connectivity
+**unchanged** at the corpus level. Diagnostic showed the geometric
+placement chosen by the auto-layouter often coincides with another
+component's WIRE endpoint, so `asc_parser._estimate_terminals`
+selects those external endpoints over the dedicated multi-pin FLAGs.
+A proper fix needs either (a) a dedicated isolation zone in the
+layouter or (b) `.asy` file lookup (planned for Phase C1). For now
+B1 preserves the data structurally (pin info is in the netlist) but
+the geometric round-trip remains lossy.
+
 ## Headline results — v0.2.1 (after Phase A: A1-A4)
 
 ### schemdraw script execution (new check)

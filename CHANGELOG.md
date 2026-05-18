@@ -1,0 +1,71 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.3.0] — 2026-05-18
+
+### Added
+
+- `Component.extra_nodes: List[str]` captures the full pin list of
+  multi-pin SUBCIRCUIT invocations (e.g. 20-pin vendor ICs such as
+  LTC2945) through NetlistParser → AscGenerator.
+- AscGenerator emits a 4×5 grid of `FLAG + WIRE` lines around each
+  SUBCIRCUIT so the regenerated `.asc` retains every pin label, not
+  just the first two.
+- 4-pin BJT / MOSFET substrate variants (`npn3`, `pnp4`, `nmos4`,
+  `pmos4`, `njf4`, `pjf4`) are recognised by `SYMBOL_TO_SPICE` and
+  preserved end-to-end. Previously the model name (`SB`, `NP`, …) was
+  re-emitted as the SYMBOL kind.
+- `* @sym=<kind>` netlist comment preserves LTspice SYMBOL variants
+  (`ind2`, `schottky`, `pnp`, `polcap`, …) through `.asc → netlist →
+  .asc`. Drift on a 240-file corpus dropped from 195 to ≈ 145 files.
+- GitHub Actions CI: `pytest` matrix on Linux + Windows × Python
+  3.10 / 3.11 / 3.12, plus an MCP import smoke test.
+- GitHub Actions release workflow: builds + publishes to PyPI via
+  OIDC trusted publishing on `v*` tag push.
+- Issue templates (`bug_report.yml`, `feature_request.yml`) and
+  `CONTRIBUTING.md`.
+- `docs/BENCHMARKS.md` documents `.asc ↔ netlist`, schemdraw arm,
+  symbol-kind drift, and GND-connectivity metrics with v0.1.0 →
+  v0.3.0 comparison.
+
+### Fixed
+
+- schemdraw script execution: 7 out of 150 sampled GitHub-repo
+  circuits failed `exec()`; all now run cleanly.
+  - `AttributeError: 'X.end' not defined` on multi-pin elements at
+    the end of a parallel group → runtime `getattr` guard with
+    `d.move()` fallback.
+  - `ValueError: Axis limits cannot be NaN or Inf` on empty drawings
+    (source `.asc` had only directives, no SYMBOLs) → invisible
+    guard line.
+  - `ValueError: SVG backend only supports saving SVG format figures`
+    on headless Linux → `.pdf` → `.svg` fallback in generated script.
+
+### Performance (400-sample real-world corpus)
+
+| Metric | v0.1.0 | v0.3.0 |
+|---|---|---|
+| `.asc → netlist → .asc` count match (mean) | 92.75 % | **99.25 %** |
+| `netlist → schemdraw → netlist` count match (mean) | 82.5 % | **≥ 90 %** |
+| schemdraw script exec failures | 7 / 150 | **0 / 150** |
+| Symbol-kind drift events | 195 files | **≈ 145 files** |
+
+### Known limitations (target Phase C+ work)
+
+- GND-connectivity preservation: 14–44 % on multi-pin vendor IC
+  topology. Geometric layout collisions defeat the multi-pin FLAG
+  scheme; needs either layouter isolation zones or `.asy` file
+  lookup.
+- `LTspiceControlLibrary\*` math/logic blocks: requires `.asy`
+  lookup to recover pin definitions.
+- `.subckt` body inclusion: invocation preserved, body may be lost.
+
+## [0.1.0] — 2026-05-18
+
+Initial public release. Successor to the (now-private)
+`ksugahar/circuit-converter`. Conversion-only scope: `.asc` ↔ `.cir`
+↔ schemdraw Python scripts. Bundles an MCP server (`mcp-ltspice`).

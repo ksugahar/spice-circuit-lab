@@ -58,6 +58,7 @@ class Component:
     node_out: str = ''           # 出力端子 — 5端子opamp用
     raw_line: str = ''           # 元のネットリスト行
     symbol_hint: str = ''        # 元の LTspice SYMBOL kind (ind2, schottky, pnp, ...)
+    extra_nodes: List[str] = field(default_factory=list)  # SUBCIRCUIT 3+ pin の追加ノード
 
 
 @dataclass
@@ -244,6 +245,7 @@ class NetlistParser:
         # 3端子素子: Q C B E model / M D G S B model / J D G S model
         node_ctrl = ''
         node_ctrl2 = ''
+        extra_nodes: List[str] = []
         if comp_type in (ComponentType.BJT, ComponentType.JFET):
             if len(parts) >= 5:
                 # SPICE BJT: Q<name> <C> <B> <E> [<sub>] <model> [<params>]
@@ -277,11 +279,19 @@ class NetlistParser:
             # K文はコンポーネントではなくディレクティブとして扱う
             return None
         elif comp_type == ComponentType.SUBCIRCUIT:
-            # X name node1 node2 ... subckt_name
+            # X name node1 node2 ... subckt_name (variable pin count)
             if len(parts) >= 4:
                 node_pos = parts[1]
                 node_neg = parts[2]
                 value = parts[-1]  # 最後がサブサーキット名
+                # Pin 3..N-1 を extra_nodes として保持 (multi-pin vendor IC)
+                extra_nodes = parts[3:-1]
+            elif len(parts) == 3:
+                # 2-pin: X1 N1 N2 (no model) — rare but valid
+                node_pos = parts[1]
+                node_neg = parts[2]
+                value = ''
+                extra_nodes = []
             else:
                 return None
         elif comp_type in (ComponentType.VCVS, ComponentType.VCCS):
@@ -347,6 +357,7 @@ class NetlistParser:
             node_ctrl=node_ctrl,
             node_ctrl2=node_ctrl2,
             raw_line=line,
+            extra_nodes=extra_nodes,
         )
 
     def _parse_u_statement(self, line: str) -> Optional[Component]:
@@ -1294,6 +1305,46 @@ class AscGenerator:
             if comp.value:
                 # Preserve the model name for re-extraction.
                 self.lines.append(f'SYMATTR SpiceModel {comp.value}')
+
+            # Emit a FLAG+WIRE for each pin so the round-trip extractor's
+            # `_estimate_terminals` fallback (search_radius=160) recovers
+            # the original pin-to-node connectivity for vendor symbols
+            # whose `.asy` file is unavailable.
+            #
+            # Layout: a compact 4-column × N-row grid around the SYMBOL
+            # centre. Each FLAG lives at a UNIQUE near-symbol coordinate
+            # and a WIRE stretches to a far point OUTSIDE the 160-unit
+            # radius so the far endpoint is not picked up as a duplicate
+            # terminal. This avoids the union-find collapse that would
+            # otherwise group all pins into one net.
+            all_pins = [comp.node_pos, comp.node_neg] + list(comp.extra_nodes)
+            all_pins = [p for p in all_pins if p]  # drop blanks
+            if all_pins:
+                COLS = 4
+                DX = 32
+                DY = 16
+                seen_flags: Set[Tuple[int, int, str]] = set()
+                seen_wires: Set[Tuple[int, int, int, int]] = set()
+                for i, node in enumerate(all_pins):
+                    col = i % COLS
+                    row = i // COLS
+                    fx = pc.x + (col - (COLS - 1) / 2) * DX
+                    fy = pc.y + row * DY - DY * 2  # roughly centred vertically
+                    fx, fy = int(fx), int(fy)
+                    flag_name = '0' if node == '0' or node.lower() == 'gnd' else node
+                    # Far endpoint: outside 160-unit Manhattan radius from
+                    # the symbol centre. +200 with a per-pin nudge keeps
+                    # endpoints distinct so unrelated pins do not union.
+                    far_x = pc.x + 200 + i * 4
+                    far_y = fy
+                    w = (fx, fy, far_x, far_y)
+                    if w not in seen_wires:
+                        seen_wires.add(w)
+                        self.lines.append(f'WIRE {fx} {fy} {far_x} {far_y}')
+                    k = (fx, fy, flag_name)
+                    if k not in seen_flags:
+                        seen_flags.add(k)
+                        self.lines.append(f'FLAG {fx} {fy} {flag_name}')
             return
 
         # `* @sym=<kind>` hint takes priority for any class — restores
