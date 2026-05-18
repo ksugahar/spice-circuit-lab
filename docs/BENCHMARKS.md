@@ -39,6 +39,20 @@ LAB-private corpus path).
 
 ## Textbook training-data corpus (LAB-private)
 
+**Distribution policy**: This corpus is the converter's training
+material.  **Only the converter itself is published**; the textbook
+circuits stay on the author's LAB-private storage and are NOT
+redistributed via this repo.  Migration of any `.cir` from the
+corpus into `tests/fixtures/` would constitute redistribution and is
+explicitly out of scope -- the public test suite uses only
+author-authored minimal circuits the author wrote from scratch.
+
+The numbers below describe how the public converter performs against
+that private corpus.  You cannot reproduce them bit-for-bit on your
+own machine, but the converter behaviour they measure is exactly
+what `pip install git+https://github.com/ksugahar/ltspice-converter`
+delivers.
+
 A second benchmark consumes a small, curated set of circuits harvested
 straight from electrical engineering textbooks. Each entry is a
 self-contained `.cir` of 3–20 components that exercises a specific

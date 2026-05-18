@@ -103,9 +103,24 @@ What this project does NOT do (and won't accept PRs for):
 - Circuit analysis / symbolic solving (use sympy / lcapy)
 - Schematic editing GUI
 - LTspice symbol library redistribution
+- **Textbook-derived test fixtures** -- see below
 
 A converter PR that adds a circuit-analysis feature will be redirected
 to a separate project.
+
+### Why textbook-derived fixtures are out of scope
+
+The converter is developed against a **private** training corpus that
+includes circuits transcribed from copyrighted textbooks.  Those
+circuits live ONLY on the author's LAB-private storage and are NOT
+mirrored here.  PRs that add textbook-sourced `.cir` / `.asc` files
+to `tests/fixtures/` (or anywhere else under this repo) will be
+declined regardless of how cleanly they round-trip.  The policy is
+simple: **trained converter is public, training data is private.**
+
+For new test fixtures, author your own minimal circuit from scratch
+(an RC/RLC/filter under a dozen components is plenty for exercising
+any single feature) and submit that.
 
 ## 8. License
 

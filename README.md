@@ -260,6 +260,26 @@ converter, a small set of author-authored test circuits, and API
 documentation.  Higher-level circuit analysis features that lived in
 the old repo are not in scope here.
 
+### Distribution policy: trained converter, private corpus
+
+Development uses **private training corpora** (textbook circuits,
+LTspice bundled examples, third-party GitHub aggregates) to measure
+round-trip fidelity and to surface converter bugs.  **Only the
+converter is published** — every corpus stays on the author's
+LAB-private storage.  Concretely:
+
+- Public: source code, CLI, MCP server, API docs, the LAB-authored
+  test fixtures under `tests/fixtures/` (~58 minimal RC/RLC/filter
+  circuits the author wrote from scratch).
+- LAB-private: textbook DB JSONs, the ~5,000-file `bench/` corpus,
+  the harvest pipeline scripts, the textbook PDFs themselves.
+
+The benchmark numbers in [docs/BENCHMARKS.md](docs/BENCHMARKS.md)
+report measurements made on LAB-private corpora; you cannot reproduce
+them bit-for-bit without your own corpus, but the converter behaviour
+they describe is exactly what you get from `pip install
+git+https://github.com/ksugahar/ltspice-converter` here.
+
 ## Test fixtures
 
 Everything under `tests/fixtures/` is author-authored: small RC / RLC /
