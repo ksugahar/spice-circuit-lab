@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ltspice-converter"
+version = "0.1.0"
+description = "Convert LTspice schematic (.asc) and SPICE netlist (.cir) files to/from schemdraw Python scripts"
+readme = "README.md"
+license = "MIT"
+authors = [
+    {name = "Mitsutoshi Sugahara", email = "ksugahar@ele.kindai.ac.jp"},
+]
+requires-python = ">=3.10"
+keywords = ["ltspice", "spice", "netlist", "schematic", "schemdraw", "eda", "converter"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Education",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+]
+dependencies = [
+    "schemdraw>=0.18",
+    "numpy>=1.20",
+]
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.0"]
+test = ["pytest>=7.0"]
+
+[project.urls]
+Homepage = "https://github.com/ksugahar/ltspice-converter"
+Issues = "https://github.com/ksugahar/ltspice-converter/issues"
+
+[project.scripts]
+mcp-ltspice = "ltspice_converter.mcp_server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+ltspice_converter = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Fixtures are demo / round-trip data, not pytest tests; do not collect them.
+norecursedirs = ["tests/fixtures", ".venv", "build", "dist"]
