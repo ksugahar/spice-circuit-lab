@@ -471,8 +471,19 @@ class AsyParser:
         """Find and parse .asy for a given symbol path.
 
         symbol_path: e.g. 'Opamps\\\\opamp', 'res', 'misc\\\\DIAC'
-        search_dirs: additional directories to search (e.g. .asc file's dir)
+        search_dirs: additional directories to search (e.g. .asc file's dir).
+                     If None or empty, falls back to the
+                     ``LTSPICE_ASY_SEARCH_PATH`` env var
+                     (os.pathsep-separated list).
         """
+        # Env-var fallback: read ``LTSPICE_ASY_SEARCH_PATH`` so user-
+        # supplied third-party symbol libraries propagate to every
+        # call site without explicit plumbing.
+        if not search_dirs:
+            env = os.environ.get('LTSPICE_ASY_SEARCH_PATH', '')
+            if env:
+                search_dirs = [Path(d) for d in env.split(os.pathsep) if d.strip()]
+
         cache_key = symbol_path + '|' + str(search_dirs or [])
         if cache_key in cls._cache:
             return cls._cache[cache_key]
@@ -1022,15 +1033,24 @@ class NetlistExtractor:
         return '\n'.join(lines)
 
     def _apply_name_remap(self, line: str) -> str:
-        """Apply InstName→SPICE name remap to directive lines (e.g. K-statements)."""
+        """Apply InstName→SPICE name remap to directive lines (e.g. K-statements).
+
+        The regex uses a negative lookbehind for `§` so an already-prefixed
+        token (e.g. `X§Q1` inside a `.subckt` body line emitted earlier by
+        this same extractor) is not re-prefixed into `X§X§Q1` on a second
+        pass through the pipeline.
+        """
         if not self._name_remap:
             return line
         import re
         # K-statement: K<name> L1 L2 [L3...] <coupling>
         # Replace component names that were remapped
         for old_name, new_name in self._name_remap.items():
-            # Word-boundary replacement to avoid partial matches
-            line = re.sub(r'\b' + re.escape(old_name) + r'\b', new_name, line)
+            # `(?<!§)` blocks the match if the candidate is already
+            # preceded by the rename separator. `\b` keeps the original
+            # word-boundary safety.
+            line = re.sub(r'(?<!§)\b' + re.escape(old_name) + r'\b',
+                          new_name, line)
         return line
 
     def _build_net_groups(self) -> List[Set[Tuple[int,int]]]:

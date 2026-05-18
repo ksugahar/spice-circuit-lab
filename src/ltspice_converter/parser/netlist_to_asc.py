@@ -147,17 +147,39 @@ class NetlistParser:
         # LTspice SYMBOL kind (ind2, schottky, pnp, polcap, ...).
         pending_symbol_hint = ''
 
+        # `.subckt ... .ends` body accumulator. While inside a subckt
+        # block, EVERY line (components, models, params, comments) is
+        # absorbed into a single multi-line directive so the regenerated
+        # .asc can re-emit the block verbatim. This prevents subckt
+        # members from leaking into top-level components.
+        subckt_accumulator: Optional[List[str]] = None
+
         for i, line in enumerate(lines):
             line = line.strip()
             if not line:
                 continue
 
             # 最初の非空行はタイトル
-            if i == 0 and not line.startswith('.') and not line.startswith('*'):
+            if (i == 0 and subckt_accumulator is None
+                    and not line.startswith('.') and not line.startswith('*')):
                 first_char = line[0].upper()
                 if first_char not in self.TYPE_MAP:
                     self.title = line
                     continue
+
+            # Inside a .subckt block — absorb everything until .ends
+            if subckt_accumulator is not None:
+                subckt_accumulator.append(line)
+                if line.lower().startswith('.ends'):
+                    full_block = '\\n'.join(subckt_accumulator)
+                    self.directives.append(SpiceDirective(text=full_block))
+                    subckt_accumulator = None
+                continue
+
+            # Entering a .subckt block: start accumulating
+            if line.lower().startswith('.subckt'):
+                subckt_accumulator = [line]
+                continue
 
             # コメント行 (@sym=... hint だけ拾う)
             if line.startswith('*'):
@@ -1164,6 +1186,8 @@ class AscGenerator:
 
     def __init__(self):
         self.lines: List[str] = []
+        # Optional .asy search dirs (set by NetlistToAsc.__init__).
+        self.asy_search_dirs: List = []
 
     def generate(self, layouter: CircuitLayouter, parser: NetlistParser,
                  sheet_width: int = 0, sheet_height: int = 0) -> str:
@@ -1352,7 +1376,10 @@ class AscGenerator:
             all_pins = [p for p in all_pins if p]  # drop blanks
             offsets = None
             if sym_name and sym_name != 'res' and all_pins:
-                offsets = _AsyParser.get_terminal_offsets(sym_name, pc.rotation)
+                offsets = _AsyParser.get_terminal_offsets(
+                    sym_name, pc.rotation,
+                    search_dirs=self.asy_search_dirs or None,
+                )
 
             if offsets and len(offsets) >= len(all_pins):
                 # .asy lookup succeeded — place each FLAG at the canonical
@@ -1638,10 +1665,26 @@ class AscGenerator:
 class NetlistToAsc:
     """ネットリスト → ASC変換の統合インターフェース"""
 
-    def __init__(self):
+    def __init__(self, asy_search_dirs: Optional[List[str]] = None):
+        """Initialize converter.
+
+        Args:
+            asy_search_dirs: additional directories to scan for `.asy`
+                files (used by multi-pin SUBCIRCUIT pin-offset lookup).
+                Falls back to the ``LTSPICE_ASY_SEARCH_PATH`` env var
+                (os.pathsep-separated) when None.
+        """
         self.parser = NetlistParser()
         self.layouter = CircuitLayouter()
         self.generator = AscGenerator()
+        # Resolve search dirs: explicit arg > env var > none.
+        if asy_search_dirs is None:
+            import os as _os
+            env = _os.environ.get('LTSPICE_ASY_SEARCH_PATH', '')
+            asy_search_dirs = [d for d in env.split(_os.pathsep) if d.strip()]
+        self.generator.asy_search_dirs = [
+            __import__('pathlib').Path(d) for d in (asy_search_dirs or [])
+        ]
 
     def convert_file(self, input_path: str, output_path: str = None) -> str:
         """.cirファイルを.ascファイルに変換"""

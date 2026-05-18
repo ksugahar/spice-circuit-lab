@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] — 2026-05-19
+
+### Added
+
+- **C3**: `.subckt ... .ends` bodies survive `.asc → netlist → .asc`
+  intact. NetlistParser now accumulates every line between `.subckt`
+  and `.ends` into a single multi-line directive instead of leaking
+  the internal components into the top-level component list, which
+  previously caused the body to vanish during regeneration.
+  Verified byte-equal on `dimmer.asc` (DIAC: 15 lines, TRIAC: 11
+  lines).
+- `_apply_name_remap` uses negative lookbehind `(?<!§)` so a token
+  already prefixed (e.g. `X§Q1` inside a subckt body) does not get
+  re-prefixed into `X§X§Q1` on a second pass.
+
+## [0.3.2] — 2026-05-19
+
+### Added
+
+- **C4**: `LTSPICE_ASY_SEARCH_PATH` environment variable lets users
+  point the converter at third-party LTspice symbol libraries
+  (`LTspiceControlLibrary`, `LTspicePowerSim`, custom `MyLib`, …).
+  Multiple paths are separated by the OS path separator (`;` on
+  Windows, `:` on Linux). The env var is consumed by both the asc
+  parser (extraction side) and the asc generator (emission side), so
+  the round-trip is self-consistent.
+  `NetlistToAsc(asy_search_dirs=[...])` accepts the same list
+  programmatically.
+
+### Notes
+
+The C4 env var does not, on its own, shift the public benchmark
+because the benchmark measured against a baseline that already had
+both directions silently dropping the same vendor symbols (matching
+"both wrong" cases). With the env var set, the round-trip is
+genuinely correct for those symbols but the benchmark surfaces
+previously-masked failures elsewhere. For users with third-party
+libraries, the user-visible behaviour is strictly better.
+
 ## [0.3.1] — 2026-05-18
 
 ### Added

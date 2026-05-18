@@ -98,6 +98,26 @@ The schemdraw round-trip `netlist → schemdraw script → netlist` runs
 at 80–100% on the same corpus (lower because schemdraw's element
 library is smaller than LTspice's symbol library).
 
+### Third-party symbol libraries
+
+For round-tripping schematics that use third-party LTspice libraries
+(not bundled in `lib.zip`), point the
+`LTSPICE_ASY_SEARCH_PATH` environment variable at the library's
+`sym/` root directory. Multiple paths are separated by the OS path
+separator (`;` on Windows, `:` on Linux/macOS):
+
+```bash
+# Linux / macOS
+export LTSPICE_ASY_SEARCH_PATH="/path/to/LTspiceControlLibrary/lib/sym:/path/to/MyLib/sym"
+
+# Windows (cmd.exe)
+set LTSPICE_ASY_SEARCH_PATH=C:\Libs\LTspiceControlLibrary\lib\sym;C:\Libs\MyLib\sym
+```
+
+When the env var is set, both `asc → netlist` and `netlist → asc`
+use the same `.asy` files, so node-to-pin topology survives the
+round-trip for those vendor symbols.
+
 See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for methodology, the
 schemdraw arm, and known failure modes.  Pass rate is not perfect —
 file a [GitHub issue](https://github.com/ksugahar/ltspice-converter/issues)
