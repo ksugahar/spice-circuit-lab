@@ -37,6 +37,52 @@ upper bound.
 The script is `bench/baseline.py` (gitignored; depends on a
 LAB-private corpus path).
 
+## Textbook training-data corpus (LAB-private)
+
+A second benchmark consumes a small, curated set of circuits harvested
+straight from electrical engineering textbooks. Each entry is a
+self-contained `.cir` of 3–20 components that exercises a specific
+SPICE feature (DC node analysis, RC/LCR/CR filter, diode companion
+model, CMOS SUBCKT, ...).  Provenance for every circuit is recorded
+in `circuit_db_<book>.json`:
+
+```json
+{
+  "book": "MATLABで学ぶ 回路シミュレーションとモデリング",
+  "author": "菅原光俊",
+  "publisher": "鳥影社",
+  "entries": [
+    {
+      "page": 158, "figure": "Fig 4.2.1",
+      "chapter": 4, "section": "4.2 DC解析",
+      "circuit_type": "linear DC node analysis (current source driven)",
+      "cir_file": "circuits_matlab/textbook_p158_Fig_4-2-1.cir",
+      "lint_status": "PASS (no warnings)",
+      ...
+    }, ...
+  ]
+}
+```
+
+The `.cir` files themselves stay LAB-private (publisher copyright) and
+live under `<mcp-server>/circuit/textbook/circuits_<book>/`.
+
+### Round-trip pass rate (28 textbook circuits, 2026-05-19)
+
+| Book | Entries | PASS (clean) | PASS (with warn) | FAIL |
+|---|---:|---:|---:|---:|
+| MATLAB で学ぶ                | 17 | 16 (94.1%) | 1 | 0 |
+| Python で学ぶ (新版)         | 11 | 10 (90.9%) | 1 | 0 |
+| **All textbook circuits**    | **28** | **26 (92.9%)** | **2** | **0** |
+| **Combined pass (any)**      |        |               | **100.0%** | |
+
+The two PASS-with-warn cases are both copies of the same `.SUBCKT INV`
+CMOS-inverter example and share a known C5 false-positive
+(X-subckt-invocation flagged as undefined `.model`; subckt-internal
+`.model` flagged as orphan) — both fixes are tracked in the
+`lint_findings_for_converter[]` section of the LAB-private DB JSON
+and will land in a future C5 patch.
+
 ## Headline results — v0.3.1 (after C2: `.asy` lookup + isolation zone)
 
 `C2` — when emitting a multi-pin SUBCIRCUIT, place the SYMBOL in an
