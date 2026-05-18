@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] — 2026-05-18
+
+### Added
+
+- **C2**: multi-pin SUBCIRCUITs now round-trip with correct topology
+  when LTspice's `lib.zip` (or any `.asy` search path) is available.
+  AscGenerator places each SUBCIRCUIT in an isolated coordinate band
+  (x ≥ 4096) and emits one FLAG per pin at the canonical pin offset
+  reported by `AsyParser.get_terminal_offsets`. asc_parser uses the
+  same lookup on re-extraction, so pins land on identical coordinates
+  and the node names match exactly.
+
+### Performance (GND-connectivity preservation, 240 samples)
+
+| Source | v0.3.0 | v0.3.1 |
+|---|---|---|
+| LTspice Examples     | 43.8 % | **48.8 %**  |
+| LTspice Applications | 13.8 % | **76.2 %**  |
+| GitHub repos         | 30.0 % | **46.2 %**  |
+| **Mean**             | **29.2 %** | **57.1 %** (+27.9 pt) |
+
+Count preservation unchanged at 99.25 %. All 32 tests pass.
+
 ## [0.3.0] — 2026-05-18
 
 ### Added

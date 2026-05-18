@@ -37,6 +37,32 @@ upper bound.
 The script is `bench/baseline.py` (gitignored; depends on a
 LAB-private corpus path).
 
+## Headline results — v0.3.1 (after C2: `.asy` lookup + isolation zone)
+
+`C2` — when emitting a multi-pin SUBCIRCUIT, place the SYMBOL in an
+isolated coordinate band (x ≥ 4096), then emit one FLAG per pin at
+the **canonical offset** reported by `AsyParser.get_terminal_offsets`
+(the same lookup the asc parser uses on re-extraction). On the way
+back through the pipeline asc_parser finds the same offsets and the
+node names match exactly. Without an available `.asy` file the
+generator falls back to the v0.3.0 compact grid (count-preserving
+but topology-lossy).
+
+### GND-connectivity preservation (node-rename-invariant topology proxy)
+
+| Source | v0.3.0 | v0.3.1 | Δ |
+|---|---|---|---|
+| LTspice Examples                | 43.8 % | **48.8 %** | +5 pt |
+| LTspice Applications            | 13.8 % | **76.2 %** | **+62.4 pt** |
+| GitHub repos                    | 30.0 % | **46.2 %** | +16.2 pt |
+| **Mean (240 samples)**          | **29.2 %** | **57.1 %** | **+27.9 pt** |
+
+Count preservation unchanged (still 99.25 % mean). The 62-point jump
+on LTspice Applications is the .asy lookup hitting on common vendor
+ICs (LTC*, ADP*, ADA*, AD*). The smaller bump on GitHub repos
+reflects symbols whose `.asy` files live in third-party libraries
+that are not on the default LTspice search path.
+
 ## Headline results — v0.3.0 (after B1 partial)
 
 `B1` — extend `Component` with `extra_nodes: List[str]` and propagate all

@@ -645,6 +645,7 @@ class CircuitLayouter:
     def __init__(self):
         self.node_positions: Dict[str, NodePosition] = {}
         self.placed_components: List[PlacedComponent] = []
+        self._subckt_iso_idx = 0  # multi-pin SUBCIRCUIT isolation slots
 
     def layout(self, parser: NetlistParser) -> 'CircuitLayouter':
         """レイアウトを実行"""
@@ -924,6 +925,31 @@ class CircuitLayouter:
                           ground_nodes: Set[str],
                           h_offset: int = 0) -> PlacedComponent:
         """コンポーネントを端子ノード間に配置"""
+        # C2 (isolation zone): multi-pin SUBCIRCUITs go to a dedicated
+        # vertical band far from regular components so the round-trip
+        # `_estimate_terminals` only picks up our own FLAG positions
+        # (and not adjacent components' WIRE endpoints).
+        if (comp.comp_type == ComponentType.SUBCIRCUIT
+                and len(comp.extra_nodes) > 0):
+            idx = self._subckt_iso_idx
+            self._subckt_iso_idx += 1
+            ISO_X_BASE = 4096   # far right of any normal layout
+            ISO_X_STEP = 384    # per-SUBCIRCUIT horizontal spacing
+            ISO_Y = 0           # above the regular schematic
+            iso_x = ISO_X_BASE + idx * ISO_X_STEP
+            iso_y = ISO_Y
+            # terminal1/terminal2 are nominal — AscGenerator._write_symbol
+            # emits its own FLAG+WIRE grid around (iso_x, iso_y) for every
+            # pin (including extras), and `_generate_wires` is suppressed
+            # for this PlacedComponent (see flag below).
+            pc = PlacedComponent(
+                component=comp,
+                x=iso_x, y=iso_y, rotation='R0',
+                terminal1=(iso_x, iso_y),
+                terminal2=(iso_x + 32, iso_y),
+            )
+            return pc
+
         pos_node = self.node_positions.get(comp.node_pos, NodePosition(0, 0))
         neg_node = self.node_positions.get(comp.node_neg, NodePosition(0, 0))
 
@@ -1166,9 +1192,13 @@ class AscGenerator:
 
         # 全端子にスタブワイヤ + FLAGを配置
         # LTspiceはFLAGがワイヤ端点上にないとピンに接続しない
+        # (C2 exclusion mirrors _generate_wires above.)
         node_terminal_map: Dict[str, List[Tuple[int, int]]] = {}
         for pc in placed:
             comp = pc.component
+            if (comp.comp_type == ComponentType.SUBCIRCUIT
+                    and len(comp.extra_nodes) > 0):
+                continue
             node_terminal_map.setdefault(comp.node_pos, []).append(pc.terminal1)
             node_terminal_map.setdefault(comp.node_neg, []).append(pc.terminal2)
             if pc.terminal3 is not None and comp.node_ctrl:
@@ -1306,20 +1336,43 @@ class AscGenerator:
                 # Preserve the model name for re-extraction.
                 self.lines.append(f'SYMATTR SpiceModel {comp.value}')
 
-            # Emit a FLAG+WIRE for each pin so the round-trip extractor's
-            # `_estimate_terminals` fallback (search_radius=160) recovers
-            # the original pin-to-node connectivity for vendor symbols
-            # whose `.asy` file is unavailable.
+            # Emit one FLAG per pin at the EXACT offset reported by
+            # AsyParser.get_terminal_offsets(<sym>, <rotation>). asc_parser
+            # uses the same lookup on re-extraction, so the pin-to-node
+            # mapping survives intact — provided the .asy file is on the
+            # LTspice library search path. Without a matching .asy we
+            # fall back to a compact grid (count-preserving but lossy on
+            # topology).
             #
-            # Layout: a compact 4-column × N-row grid around the SYMBOL
-            # centre. Each FLAG lives at a UNIQUE near-symbol coordinate
-            # and a WIRE stretches to a far point OUTSIDE the 160-unit
-            # radius so the far endpoint is not picked up as a duplicate
-            # terminal. This avoids the union-find collapse that would
-            # otherwise group all pins into one net.
+            # Imported here to avoid a top-level circular import; this
+            # path is only hit for SUBCIRCUITs.
+            from .asc_parser import AsyParser as _AsyParser  # noqa: E402
+
             all_pins = [comp.node_pos, comp.node_neg] + list(comp.extra_nodes)
             all_pins = [p for p in all_pins if p]  # drop blanks
-            if all_pins:
+            offsets = None
+            if sym_name and sym_name != 'res' and all_pins:
+                offsets = _AsyParser.get_terminal_offsets(sym_name, pc.rotation)
+
+            if offsets and len(offsets) >= len(all_pins):
+                # .asy lookup succeeded — place each FLAG at the canonical
+                # pin location. asc_parser will pick the same coordinates
+                # on re-extraction, so node names round-trip exactly.
+                for i, node in enumerate(all_pins):
+                    ox, oy = offsets[i]
+                    fx = pc.x + ox
+                    fy = pc.y + oy
+                    flag_name = '0' if node == '0' or node.lower() == 'gnd' else node
+                    # 1-unit stub wire so the FLAG endpoint is a wire
+                    # endpoint (LTspice convention: FLAGs only attach to
+                    # wire endpoints).
+                    self.lines.append(f'WIRE {fx} {fy} {fx+8} {fy}')
+                    self.lines.append(f'FLAG {fx} {fy} {flag_name}')
+            elif all_pins:
+                # .asy not found — fall back to compact grid layout.
+                # Preserves component count but topology will drift on
+                # re-extraction because the grid does not match any
+                # canonical pin offsets.
                 COLS = 4
                 DX = 32
                 DY = 16
@@ -1329,12 +1382,9 @@ class AscGenerator:
                     col = i % COLS
                     row = i // COLS
                     fx = pc.x + (col - (COLS - 1) / 2) * DX
-                    fy = pc.y + row * DY - DY * 2  # roughly centred vertically
+                    fy = pc.y + row * DY - DY * 2
                     fx, fy = int(fx), int(fy)
                     flag_name = '0' if node == '0' or node.lower() == 'gnd' else node
-                    # Far endpoint: outside 160-unit Manhattan radius from
-                    # the symbol centre. +200 with a per-pin nudge keeps
-                    # endpoints distinct so unrelated pins do not union.
                     far_x = pc.x + 200 + i * 4
                     far_y = fy
                     w = (fx, fy, far_x, far_y)
@@ -1423,9 +1473,17 @@ class AscGenerator:
         self._flag_positions = {}  # node_name -> list of (x, y) for FLAG
 
         # 全ピン位置を収集
+        # C2: multi-pin SUBCIRCUITs are isolated (see _place_component) and
+        # emit their own FLAG+WIRE grid in _write_symbol. Exclude them here
+        # so the auto-router does not connect their nominal terminals back
+        # to regular nodes (which would create spurious wire endpoints
+        # near isolated SYMBOLs and defeat the isolation).
         node_pins: Dict[str, List[Tuple[int, int]]] = {}
         for pc in placed:
             comp = pc.component
+            if (comp.comp_type == ComponentType.SUBCIRCUIT
+                    and len(comp.extra_nodes) > 0):
+                continue
             node_pins.setdefault(comp.node_pos, []).append(pc.terminal1)
             node_pins.setdefault(comp.node_neg, []).append(pc.terminal2)
             if pc.terminal3 is not None and comp.node_ctrl:
