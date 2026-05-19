@@ -399,7 +399,12 @@ def test_info_text_counts_by_class():
 
 
 def test_mcp_tools_registered():
-    """The mcp_server module exposes all six tools (4 conversion + 2 lint/info)."""
+    """The mcp_server module exposes all six tools (4 conversion + 2 lint/info).
+
+    Requires the optional ``[mcp]`` extra. CI runs with ``[test]`` only,
+    so we skip if the ``mcp`` dependency isn't installed.
+    """
+    pytest.importorskip("mcp.server.fastmcp")
     from ltspice_converter import mcp_server
     names = {
         t.name if hasattr(t, "name") else getattr(t, "fn", t).__name__
