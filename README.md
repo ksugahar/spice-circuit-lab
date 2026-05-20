@@ -4,11 +4,12 @@
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://github.com/ksugahar/ltspice-converter)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-What's new in [v0.3.12](CHANGELOG.md): multi-pin SUBCIRCUIT fallback
-layout now preserves pin index order on round-trip without `.asy`
--- GitHub-corpus GND-pin metric 96.4 % -> **98.9 %**.  v0.3.11 fixed
-the schemdraw arm (+13 pt Examples).  v0.3.10 brought the
-`.asc <-> .cir` arm to **100 %** on all real-world corpora.
+What's new in [v0.3.13](CHANGELOG.md): transmission-line (`T`) support
+on the schemdraw arm -- both round-trip arms now hit **100 %** on the
+three real-world corpora (count match).  v0.3.12 fixed multi-pin
+SUBCIRCUIT pin order (GND-pin metric 96.4 -> 98.9 %).  v0.3.11 fixed
+K-directive + multi-line `.subckt` (+13 pt Examples).  v0.3.10
+brought the `.asc <-> .cir` arm to 100 %.
 
 Convert between three circuit representations:
 
@@ -38,7 +39,7 @@ pip install "ltspice-converter[mcp] @ git+https://github.com/ksugahar/ltspice-co
 Pinning a specific version:
 
 ```bash
-pip install git+https://github.com/ksugahar/ltspice-converter@v0.3.12
+pip install git+https://github.com/ksugahar/ltspice-converter@v0.3.13
 ```
 
 For development:
@@ -253,8 +254,9 @@ corpora (component count preserved):
 | GitHub repos (unseen, 720 files)              | 100% |
 
 The schemdraw round-trip `netlist → schemdraw script → netlist`
-(component count match) runs at 98-100% on the same corpora after
-the v0.3.11 K-directive and multi-line `.subckt` fixes.
+(component count match) runs at **100%** on the same corpora after
+the v0.3.11 K-directive / multi-line `.subckt` fixes and the v0.3.13
+transmission-line (`T`) fix.
 
 ### Third-party symbol libraries
 

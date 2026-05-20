@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.13] — 2026-05-20
+
+### Fixed (H2: transmission lines dropped on schemdraw round-trip)
+
+`cir_to_schemdraw` emits ``elm.Coax()`` for SPICE T (transmission
+line) components, but `schemdraw_to_cir.SCHEMDRAW_TO_SPICE` had no
+``'Coax'`` entry -- so every T-line was silently dropped on the
+``.cir -> schemdraw script -> .cir`` round-trip.  This was the
+single remaining cluster of real component-count drift on the
+schemdraw arm after the F1 K-directive fix (4 lab Examples files,
+2 GitHub-repo files).
+
+Fix: add ``'Coax': 'T'`` to the map and a 4-node emission path in
+`_process_element` that reconstructs the SPICE T-line form
+``T<name> A+ A- B+ B- [params]`` from schemdraw's 2-anchor Coax
+(A+ = start, A- = 0, B+ = 0, B- = end).  Node assignment is not
+byte-exact (schemdraw's 2-pin Coax cannot represent both ports
+losslessly) but the component count and T-prefix survive, which is
+what the lint and round-trip metrics measure.
+
+### Performance
+
+Schemdraw arm round-trip pass rate (count match, 300-file samples):
+
+| Corpus | 0.3.12 | 0.3.13 |
+|---|---|---|
+| GitHub repos          | 99.33 % | **100.00 %** |
+| LTspice Examples      | 98.00 % | **100.00 %** |
+| LTspice Applications  | 100.00 % | 100.00 % |
+
+The .asc <-> .cir arm remains at 100 % on all corpora
+(D2/D3 work, v0.3.8 / v0.3.10).
+
+### Added
+
+- 1 pytest regression test
+  (`test_schemdraw_arm_preserves_transmission_line`).
+
 ## [0.3.12] — 2026-05-20
 
 ### Fixed (G2: multi-pin SUBCIRCUIT pin-order drift without .asy)

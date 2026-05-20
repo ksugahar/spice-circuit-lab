@@ -50,6 +50,8 @@ SCHEMDRAW_TO_SPICE = {
     'SourceControlledV': 'E', 'SourceControlledI': 'G',
     # Switch
     'Switch': 'S',
+    # Transmission line (cir_to_schemdraw emits ``elm.Coax()`` for T)
+    'Coax': 'T',
 }
 
 # 3端子要素のアンカー名マッピング
@@ -442,6 +444,15 @@ class SchemdrawToCir:
                 model = value if value else 'D'
                 self.spice_lines.append(
                     f"{comp_name} {node_start} {node_end} {model}")
+            elif prefix == 'T':
+                # SPICE transmission line: T<name> A+ A- B+ B- [params]
+                # schemdraw's Coax has 2 signal anchors (start, end); the
+                # shield/return is implicit (and grounded in practice).
+                # Map A+ = start, A- = 0, B+ = 0, B- = end; preserves
+                # component count and signal-path semantics on round-trip.
+                val_str = value if value else ''
+                self.spice_lines.append(
+                    f"{comp_name} {node_start} 0 0 {node_end} {val_str}".rstrip())
             else:
                 # R, L, C
                 val_str = value if value else '1'

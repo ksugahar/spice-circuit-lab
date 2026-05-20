@@ -499,6 +499,36 @@ def test_multi_pin_subckt_pin_order_preserved_without_asy():
     )
 
 
+def test_schemdraw_arm_preserves_transmission_line(tmp_path, monkeypatch):
+    """Regression for v0.3.13 H2 fix: transmission lines (SPICE T) must
+    survive the .cir -> schemdraw script -> .cir round-trip.  Before
+    this fix cir_to_schemdraw emitted ``elm.Coax()`` for T components
+    but schemdraw_to_cir had no ``'Coax'`` entry in its
+    SCHEMDRAW_TO_SPICE map, so every transmission line was silently
+    dropped on the way back -- 4 cases on the lab Examples corpus.
+    """
+    monkeypatch.chdir(tmp_path)
+    netlist = (
+        "* lossless transmission line\n"
+        "V1 IN 0 PULSE(0 1 0 1n 1n 10n)\n"
+        "T1 IN 0 0 OUT Td=10n Z0=50\n"
+        "R1 OUT 0 50\n"
+        ".tran 50n\n"
+        ".end\n"
+    )
+    import ltspice_converter as lc
+    script = lc.netlist_to_schemdraw(netlist, name="tl")
+    recovered = lc.schemdraw_to_netlist(script, title="tl")
+    # The T-line must be preserved on the way back.  Node assignment
+    # may not be byte-exact (schemdraw's Coax is a 2-pin element so
+    # the 4-node SPICE T form has to be reconstructed), but the count
+    # and the T-prefix must be intact.
+    t_lines = [l for l in recovered.split("\n") if l.strip().startswith("T")]
+    assert t_lines, (
+        f"T-line dropped on schemdraw round-trip; recovered:\n{recovered}"
+    )
+
+
 def test_subckt_body_round_trip():
     """.subckt body must survive .cir -> .asc -> .cir byte-equal.
 
