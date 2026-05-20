@@ -463,7 +463,17 @@ class SchemdrawToCir:
                 if not text:
                     continue
                 text = text.strip()
-                if text.startswith('.'):
+                # NetlistParser classifies K (mutual inductance) and A
+                # (digital primitive) lines as directives alongside the
+                # `.tran` / `.ac` / `.model` / etc. families. cir_to_schemdraw
+                # emits all four as Annotate labels, so we must accept all
+                # four prefixes here too -- previously only `.`-prefix was
+                # picked up and the K/A statements silently dropped on
+                # round-trip.
+                if not text:
+                    continue
+                first = text[0]
+                if first == '.' or first.upper() in ('K', 'A'):
                     self.directives.append(text)
                 elif text.startswith('NODE:'):
                     node_names_found.append(text[5:])
@@ -548,7 +558,16 @@ class SchemdrawToCir:
         lines.append(f"* {self.title}")
         lines.extend(self.spice_lines)
         for d in self.directives:
-            lines.append(d)
+            # NetlistParser packs multi-line directives (e.g. .subckt ... .ends
+            # bodies) into a single SpiceDirective.text with embedded real
+            # newlines. cir_to_schemdraw stores them as Annotate labels with
+            # the newlines escaped to literal "\n" so the Python string fits
+            # on one source line. Restore real newlines on the way back out
+            # so each internal component reappears on its own SPICE line and
+            # any downstream tooling (lint, count-based round-trip checks)
+            # sees the .subckt body as the multi-line block it really is.
+            d_restored = d.replace('\\n', '\n')
+            lines.append(d_restored)
         if not any(d.lower().startswith('.end') for d in self.directives):
             lines.append('.end')
         return '\n'.join(lines)

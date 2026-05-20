@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.11] — 2026-05-20
+
+### Fixed (F1: schemdraw arm round-trip — K-directive + multi-line .subckt)
+
+Two bugs that prevented the ``netlist -> schemdraw script -> netlist``
+arm from preserving component count.  Both originated in
+`schemdraw_to_cir.py`: the script extractor was too narrow about which
+labels count as SPICE directives, and the line-formatter packed
+multi-line directives into a single physical line.
+
+- **F1-1 (K / A directives silently dropped)**:
+  `cir_to_schemdraw` already emits K (mutual inductance) and A
+  (digital primitive) statements as Annotate labels alongside the
+  ``.tran`` / ``.ac`` / ``.model`` / ``.subckt`` family.  But
+  `schemdraw_to_cir._collect_directives_and_node_names` only picked up
+  labels whose first character was ``.``, so every K and A statement
+  was silently dropped on the round-trip.  K losses alone accounted
+  for 23 / 31 missing components on a 100-file LTspice Examples
+  sample.  Fix: also accept ``K``/``A`` as a first-character match.
+
+- **F1-2 (multi-line .subckt body collapsed to one line)**:
+  `NetlistParser` packs a ``.subckt ... .ends`` block into a single
+  `SpiceDirective.text` with embedded real newlines.
+  `cir_to_schemdraw` escapes the newlines to literal ``\n`` so the
+  Python string literal stays on one source line in the Annotate
+  call.  But the extractor's `_format_netlist` wrote the directive
+  back verbatim -- newlines still escaped -- so the regenerated
+  netlist had the entire DIAC / TRIAC subckt body packed into one
+  physical line.  Downstream tooling (lint, count-based round-trip
+  checks) saw zero internal components.  Fix: unescape ``\n`` to a
+  real newline on the way out so every internal component reappears
+  on its own SPICE line.
+
+### Performance
+
+Schemdraw arm round-trip pass rate (200-file sample per corpus):
+
+| Corpus | 0.3.10 | 0.3.11 |
+|---|---|---|
+| GitHub repos | 191/200 = 95.5 % | **198/200 = 99.0 %** (+3.5 pt) |
+| LTspice Examples | 85/100 = 85.0 % | **98/100 = 98.0 %** (+13 pt) |
+| LTspice Applications | 198/200 = 99.0 % | 200/200 = 100 % |
+
+The Examples bump is dominated by F1-1 (K-statement preservation);
+the GitHub-corpus bump and the dimmer.asc-style cases are mostly
+F1-2 (multi-line .subckt restoration).
+
+The dense-`.asc -> netlist -> .asc` arm remains at 100 % on all
+four real-world corpora (D1-D3 work, v0.3.8-v0.3.10).
+
+### Added
+
+- 2 pytest regression tests:
+  `test_schemdraw_arm_preserves_k_directive`,
+  `test_schemdraw_arm_preserves_multiline_subckt`.
+
 ## [0.3.10] — 2026-05-19
 
 ### Fixed (D3: last 3 GitHub-corpus failures + a 1-fail Examples regression)

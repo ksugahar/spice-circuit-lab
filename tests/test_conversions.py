@@ -390,6 +390,72 @@ TEXT 0 200 Left 2 !.tran 1m
     )
 
 
+def test_schemdraw_arm_preserves_k_directive(tmp_path, monkeypatch):
+    """Regression for v0.3.11 F1 fix: K (mutual inductance) directives must
+    survive the .cir -> schemdraw script -> .cir round-trip. Before this
+    fix the script generator emitted K as an Annotate label like the other
+    directives, but the script -> netlist extractor only matched labels
+    starting with ``.`` and silently dropped every K statement on the way
+    back -- a 23-instance loss on the lab Examples corpus.
+    """
+    monkeypatch.chdir(tmp_path)
+    netlist = (
+        "* coupled inductors\n"
+        "V1 in 0 AC 1\n"
+        "L1 in mid 1m\n"
+        "L2 mid out 1m\n"
+        "K1 L1 L2 0.9\n"
+        "R1 out 0 50\n"
+        ".ac dec 20 1 100k\n"
+        ".end\n"
+    )
+    import ltspice_converter as lc
+    script = lc.netlist_to_schemdraw(netlist, name="coupled")
+    recovered = lc.schemdraw_to_netlist(script, title="coupled")
+    # K1 must reappear in the regenerated netlist as a K-directive line.
+    k_lines = [l for l in recovered.split("\n") if l.strip().upper().startswith("K")]
+    assert k_lines, (
+        f"K directive dropped on schemdraw round-trip; recovered netlist:\n"
+        f"{recovered}"
+    )
+
+
+def test_schemdraw_arm_preserves_multiline_subckt(tmp_path, monkeypatch):
+    """Regression for v0.3.11 F1 fix: a multi-line .subckt block must be
+    re-emitted as multiple lines (not stuffed into one line with literal
+    ``\\n`` escapes that hide every internal component from line-based
+    counters).
+    """
+    monkeypatch.chdir(tmp_path)
+    netlist = (
+        "* dimmer-ish\n"
+        "V1 in 0 SINE(0 230 50)\n"
+        "X1 in 0 mydiac\n"
+        ".tran 20m\n"
+        "\n"
+        ".subckt mydiac T1 T2\n"
+        ".model BD D Bv=30\n"
+        "D1 T1 T2 BD\n"
+        "D2 T2 T1 BD\n"
+        ".ends mydiac\n"
+        ".end\n"
+    )
+    import ltspice_converter as lc
+    script = lc.netlist_to_schemdraw(netlist, name="dimmer")
+    recovered = lc.schemdraw_to_netlist(script, title="dimmer")
+    # The two diodes inside the subckt body must appear as their own lines.
+    assert "\nD1 " in recovered or recovered.lstrip().startswith("D1 "), (
+        f"D1 (inside .subckt body) not on its own line; recovered:\n{recovered}"
+    )
+    assert "\nD2 " in recovered, (
+        f"D2 (inside .subckt body) not on its own line; recovered:\n{recovered}"
+    )
+    # And the closing .ends marker.
+    assert ".ends" in recovered.lower(), (
+        f".ends marker missing; recovered:\n{recovered}"
+    )
+
+
 def test_subckt_body_round_trip():
     """.subckt body must survive .cir -> .asc -> .cir byte-equal.
 

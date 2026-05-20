@@ -4,11 +4,10 @@
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://github.com/ksugahar/ltspice-converter)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-What's new in [v0.3.10](CHANGELOG.md): two more round-trip-drop bugs
-fixed (off-by-one `@sym` hint, 1-pin X dropped) -- **100 %** pass rate
-on all three real-world corpora now (GitHub repos / LTspice
-Applications / LTspice Examples).  v0.3.9 added `check_circuit` /
-`info_circuit` MCP tools.
+What's new in [v0.3.11](CHANGELOG.md): schemdraw arm gets two fixes
+(K-directive preservation, multi-line `.subckt` re-emission) -- a
+13-point Examples-corpus bump.  v0.3.10 brought the `.asc <-> .cir`
+arm to **100 %** on all real-world corpora.
 
 Convert between three circuit representations:
 
@@ -38,7 +37,7 @@ pip install "ltspice-converter[mcp] @ git+https://github.com/ksugahar/ltspice-co
 Pinning a specific version:
 
 ```bash
-pip install git+https://github.com/ksugahar/ltspice-converter@v0.3.10
+pip install git+https://github.com/ksugahar/ltspice-converter@v0.3.11
 ```
 
 For development:
@@ -252,9 +251,9 @@ corpora (component count preserved):
 | Textbook circuits (training-adjacent, 28 files) | 100% |
 | GitHub repos (unseen, 720 files)              | 100% |
 
-The schemdraw round-trip `netlist → schemdraw script → netlist` runs
-at 80–100% on the same corpus (lower because schemdraw's element
-library is smaller than LTspice's symbol library).
+The schemdraw round-trip `netlist → schemdraw script → netlist`
+(component count match) runs at 98-100% on the same corpora after
+the v0.3.11 K-directive and multi-line `.subckt` fixes.
 
 ### Third-party symbol libraries
 
