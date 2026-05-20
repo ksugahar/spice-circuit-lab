@@ -5,6 +5,54 @@ real-world LTspice circuits.  All numbers come from LAB-local
 benchmarks; the corpus itself is not redistributed (see [README §
 Project history & scope](../README.md)).
 
+## Headline results — v0.3.13 (current)
+
+Both round-trip arms now hit 100 % on all three real-world corpora
+(component-count match), and the GND-pin topology proxy clears 98 %
+on each.
+
+| Metric | Corpus | files | v0.3.7 | **v0.3.13** |
+|---|---|---:|---:|---:|
+| `.asc → netlist → .asc` count | GitHub repos     |  720 |  96.7 % | **100.00 %** |
+| `.asc → netlist → .asc` count | LTspice Examples |  100 |  99.0 % | **100.00 %** |
+| `.asc → netlist → .asc` count | LTspice Applications | 4099 | 100.0 % | **100.00 %** |
+| `netlist → schemdraw → netlist` count | GitHub repos | 720 |  ~85 % | **~100 %** (300-sample) |
+| `netlist → schemdraw → netlist` count | LTspice Examples | 100 |  85.0 % | **100.00 %** |
+| `netlist → schemdraw → netlist` count | LTspice Applications | 4099 | ~99 % | **100.00 %** (300-sample) |
+| GND-pin position preservation | GitHub repos | 11075 GND-pins | 96.4 % | **98.93 %** |
+| GND-pin position preservation | LTspice Examples |  1829 | 99.6 % | **99.73 %** |
+| GND-pin position preservation | LTspice Applications | 50503 | 99.8 % | **99.78 %** |
+| schemdraw script exec failure | GitHub repos     |  720 |  ~5 % |  **0.14 %** (1 file: matplotlib mathtext) |
+
+### What landed in v0.3.8 - v0.3.13
+
+| Version | Fix | Effect |
+|---|---|---|
+| **0.3.8** D2 | `NetlistParser` accepts modelless Q/J/M (LTspice default-NPN form); InstName prefix-fix triggers for any non-matching first letter | GitHub-corpus count 96.7 → 99.6 % |
+| **0.3.9** E1 | MCP server gains `check_circuit` / `info_circuit` (round-trip lint + stats for AI agents); `asy_search_dirs` on the conversion tools | Agent self-validation loop |
+| **0.3.10** D3 | `* @sym=` hint emitted **before** the component line (parser ties hints to NEXT component); 1-pin X-prefix vendor symbols emit `<name> <node> <subckt>` (was 2-token, dropped) | `.asc ↔ .cir` 100 % on all corpora |
+| **0.3.11** F1 | Schemdraw extractor accepts K (mutual inductance) and A (digital) directives, not only `.`-prefixed; `.subckt` body re-emitted with real newlines | Examples schemdraw arm +13 pt |
+| **0.3.12** G2 | Multi-pin SUBCIRCUIT FLAG fallback uses single-column monotonic-distance layout (was 4×N grid with tied distances); pin order survives round-trip without `.asy` | GitHub GND-pin 96.4 → 98.93 % (278 fewer drifts) |
+| **0.3.13** H2 | `schemdraw_to_cir` recognises `elm.Coax()` as transmission line (was silently dropped) | Schemdraw arm 100 % on all corpora |
+
+### Remaining residual (sub-percent)
+
+- **GND-pin 0.2-1.1 %** drift on multi-pin vendor symbols whose `.asy`
+  is not on the default LTspice search path.  Set
+  `LTSPICE_ASY_SEARCH_PATH` (or pass `--asy-dir`) for the affected
+  third-party libraries and these resolve.  Without the .asy, the
+  v0.3.12 column fallback keeps **index order** but does not match
+  the original wire-end coordinates.
+- **0.14 %** schemdraw exec failure on a single GitHub-corpus file
+  whose component label embeds `{Tperiod}`-style parameter braces
+  that matplotlib's text renderer parses as LaTeX.  Not a converter
+  bug per se; would require either escaping `{`/`}` in
+  `_sanitize_label` (loses lint round-trip of `{PARAM}`
+  references) or switching matplotlib's mathtext off globally.
+  Deferred.
+
+
+
 ## Methodology
 
 For each `.asc` in the sample:
