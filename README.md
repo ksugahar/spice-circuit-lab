@@ -182,6 +182,100 @@ Exposes six tools:
 Typical agent loop: generate netlist → `check_circuit(..., 'cir')` →
 if `warnings` non-empty, fix and re-check → only ship when clean.
 
+## End-to-end workflow: AI-assisted circuit editing
+
+A typical loop that exercises every layer of the converter — from
+the LTspice schematic, through an AI agent, and back to LTspice —
+looks like this:
+
+```
+                    +----------+    +-----+    +-----+
+   LTspice GUI ---> | foo.asc  |--->|.cir |    |.py  | --> PDF/SVG
+   (human draws)    +----------+    +-----+    +-----+    (publishable)
+                         ^             |
+                         |             v
+                         |       Claude / Cursor
+                         |       (edits .cir)
+                         |             |
+                         |             v
+                         |       check_circuit(...)
+                         |             |
+                         +-------------+
+                              (ships only when warnings = [])
+```
+
+### Step-by-step
+
+1. **Start in LTspice**: open or draw a schematic, save as `foo.asc`.
+
+2. **Hand to an AI agent**.  In Claude Code or Cursor with
+   `mcp-ltspice` configured, ask the agent to modify the circuit.
+   The agent calls:
+
+   ```
+   asc_to_netlist(asc_text=<contents of foo.asc>)
+   → returns the SPICE netlist text
+   ```
+
+3. **Agent edits the netlist** in conversation (add a resistor,
+   change a model, swap an op-amp).  Before claiming the job done,
+   it validates:
+
+   ```
+   check_circuit(text=<edited netlist>, fmt='cir')
+   → {"ok": false, "warnings": ["floating node N003"]}
+   ```
+
+   If `warnings` is non-empty the agent fixes and re-checks.  It
+   only "ships" the result when `ok == true`.
+
+4. **Back to `.asc`** so the user can verify in LTspice:
+
+   ```
+   netlist_to_asc(netlist=<clean netlist>)
+   → returns .asc text; user saves as foo_v2.asc
+   ```
+
+5. **Reopen in LTspice** to visually inspect and run the simulation.
+   The regenerated schematic looks like one a human would have drawn
+   — `.asc → .cir → .asc` count match is 100 % on real-world corpora
+   (see [docs/BENCHMARKS.md](docs/BENCHMARKS.md)).
+
+### Same loop without MCP (just the CLI)
+
+```bash
+# 1-2. Extract netlist from LTspice schematic
+ltspice-convert foo.asc -o foo.cir
+
+# 3. Edit foo.cir by hand (or with any tool), then lint
+ltspice-convert --check --strict foo.cir
+
+# 4-5. Regenerate the schematic for LTspice
+ltspice-convert foo.cir -o foo_v2.asc
+
+# Or render to PDF/SVG via schemdraw — no LTspice install needed,
+# useful for papers, slides, and web pages:
+ltspice-convert foo.cir -o foo.py && python foo.py
+```
+
+### Why this matters
+
+LTspice's `.asc` is a custom format that does not diff cleanly and is
+not portable outside Windows/Mac.  By going through the SPICE netlist
+(plain text, diff-able, standard-format) and optionally a schemdraw
+Python script (runnable, publishable, AI-readable), this converter
+lets you:
+
+- **review circuit changes in git** like any other source file,
+- **let an AI agent author or refactor circuits** with a verification
+  loop that catches drift,
+- **render publication-quality figures** without launching LTspice,
+- **work on Linux** where LTspice is harder to install.
+
+The whole point of the v0.3.8 - v0.3.13 work was making this loop
+trustworthy enough that the agent's "ship" decision can be taken at
+face value.
+
 ## Supported elements
 
 | SPICE | schemdraw | LTspice symbol |
