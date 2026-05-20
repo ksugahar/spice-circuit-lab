@@ -4,10 +4,11 @@
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://github.com/ksugahar/ltspice-converter)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-What's new in [v0.3.11](CHANGELOG.md): schemdraw arm gets two fixes
-(K-directive preservation, multi-line `.subckt` re-emission) -- a
-13-point Examples-corpus bump.  v0.3.10 brought the `.asc <-> .cir`
-arm to **100 %** on all real-world corpora.
+What's new in [v0.3.12](CHANGELOG.md): multi-pin SUBCIRCUIT fallback
+layout now preserves pin index order on round-trip without `.asy`
+-- GitHub-corpus GND-pin metric 96.4 % -> **98.9 %**.  v0.3.11 fixed
+the schemdraw arm (+13 pt Examples).  v0.3.10 brought the
+`.asc <-> .cir` arm to **100 %** on all real-world corpora.
 
 Convert between three circuit representations:
 
@@ -37,7 +38,7 @@ pip install "ltspice-converter[mcp] @ git+https://github.com/ksugahar/ltspice-co
 Pinning a specific version:
 
 ```bash
-pip install git+https://github.com/ksugahar/ltspice-converter@v0.3.11
+pip install git+https://github.com/ksugahar/ltspice-converter@v0.3.12
 ```
 
 For development:

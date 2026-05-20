@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.12] — 2026-05-20
+
+### Fixed (G2: multi-pin SUBCIRCUIT pin-order drift without .asy)
+
+When a multi-pin X-class component (vendor IC, custom subckt, ...) has
+no resolvable `.asy` file on the LTspice symbol search path,
+AscGenerator falls back to a generic FLAG layout.  The fallback used
+to be a 4 x N grid of FLAGs around the symbol body, but multiple
+grid positions shared the same Manhattan distance from the symbol
+centre.  On re-extraction asc_parser._estimate_terminals orders pins
+by ascending Manhattan distance, so the tied positions got reshuffled
+into an arbitrary order -- silently moving e.g. the GND pin of a
+6-pin IC from index 5 to index 4.
+
+Replaced the grid with a single-column layout where pin i sits at
+offset (DX, DY*(i+1)) from the symbol centre.  Manhattan distance is
+then strictly monotonic in i, the round-trip preserves index order,
+and the GND-pin metric stops reporting spurious topology drifts.
+
+### Performance
+
+GND-pin position preservation (all components with a GND pin):
+
+| Corpus | 0.3.11 | 0.3.12 |
+|---|---|---|
+| GitHub repos          | 10679 / 11075 = 96.42 % | **10957 / 11075 = 98.93 %** (+2.5 pt) |
+| LTspice Examples      |  1821 /  1829 = 99.56 % |  1824 /  1829 = 99.73 % |
+| LTspice Applications  | 50382 / 50503 = 99.76 % | 50394 / 50503 = 99.78 % |
+
+File-level GND-clean rate on GitHub repos: 524 -> **624 files** clean
+out of 720 (+100 files where no GND-pin drifts at all).
+
+Count-preservation pass rate unchanged at 100 % on all three corpora
+(no regression from the layout change).
+
+### Added
+
+- 1 pytest regression test
+  (`test_multi_pin_subckt_pin_order_preserved_without_asy`).
+
 ## [0.3.11] — 2026-05-20
 
 ### Fixed (F1: schemdraw arm round-trip — K-directive + multi-line .subckt)

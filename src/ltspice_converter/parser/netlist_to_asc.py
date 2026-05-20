@@ -1420,23 +1420,29 @@ class AscGenerator:
                     self.lines.append(f'WIRE {fx} {fy} {fx+8} {fy}')
                     self.lines.append(f'FLAG {fx} {fy} {flag_name}')
             elif all_pins:
-                # .asy not found — fall back to compact grid layout.
-                # Preserves component count but topology will drift on
-                # re-extraction because the grid does not match any
-                # canonical pin offsets.
-                COLS = 4
+                # .asy not found — fall back to a single-column FLAG layout
+                # where pin i sits at offset (DX, DY*i) from the symbol
+                # centre.  Manhattan distance is then DX + DY*i, strictly
+                # monotonic in i, so when asc_parser._estimate_terminals
+                # reads pins back (sorted by Manhattan distance ascending)
+                # the index order is preserved -- the round-trip is
+                # topology-correct even without a matching .asy file.
+                # Replaces the previous 4-column grid fallback whose
+                # equal-distance neighbours randomised pin order on
+                # re-extraction (G2 fix, see GND-pin drift bench v0.3.11
+                # -> v0.3.12 in BENCHMARKS.md).
                 DX = 32
                 DY = 16
                 seen_flags: Set[Tuple[int, int, str]] = set()
                 seen_wires: Set[Tuple[int, int, int, int]] = set()
                 for i, node in enumerate(all_pins):
-                    col = i % COLS
-                    row = i // COLS
-                    fx = pc.x + (col - (COLS - 1) / 2) * DX
-                    fy = pc.y + row * DY - DY * 2
-                    fx, fy = int(fx), int(fy)
+                    fx = pc.x + DX
+                    fy = pc.y + DY * (i + 1)
                     flag_name = '0' if node == '0' or node.lower() == 'gnd' else node
-                    far_x = pc.x + 200 + i * 4
+                    # Long horizontal wire to give the FLAG a wire endpoint
+                    # to attach to (LTspice convention).  Far end shifted by
+                    # i so multiple stubs at the same y don't merge.
+                    far_x = pc.x + DX + 200 + i * 4
                     far_y = fy
                     w = (fx, fy, far_x, far_y)
                     if w not in seen_wires:

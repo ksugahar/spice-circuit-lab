@@ -456,6 +456,49 @@ def test_schemdraw_arm_preserves_multiline_subckt(tmp_path, monkeypatch):
     )
 
 
+def test_multi_pin_subckt_pin_order_preserved_without_asy():
+    """Regression for v0.3.12 G2 fix: when a multi-pin SUBCIRCUIT has no
+    resolvable `.asy` file, the FLAG fallback layout must place pins at
+    strictly monotonic Manhattan distance from the symbol centre so that
+    asc_parser._estimate_terminals (which orders pins by ascending
+    distance) recovers the same index order on re-extraction.
+
+    Before this fix the fallback was a 4-column grid where multiple pins
+    shared the same Manhattan distance, and the round-trip silently
+    shuffled the pin order -- e.g. a 6-pin vendor symbol with GND on
+    pin 5 of 6 would be re-extracted with GND on pin 4, looking like
+    a topology bug to downstream tooling.
+    """
+    # Start from a SPICE netlist (no .asy file involved), convert to .asc,
+    # then re-extract, and verify the multi-pin X line keeps the same pin
+    # order. The intermediate .asc emission hits the fallback layout
+    # because "ACME_6PIN_VENDOR_BLOCK" is not a known LTspice symbol.
+    netlist = (
+        "* multi-pin vendor IC test\n"
+        "V1 INA 0 1\n"
+        "V2 INB 0 1\n"
+        "V3 VCC 0 5\n"
+        "R1 OUTA 0 1k\n"
+        "R2 OUTB 0 1k\n"
+        "X1 INA INB OUTA OUTB VCC 0 ACME_6PIN_VENDOR_BLOCK\n"
+        ".tran 1m\n"
+        ".end\n"
+    )
+    asc2 = NetlistToAsc().convert_string(netlist)
+    parser2 = AscParser()
+    parser2.parse_string(asc2)
+    netlist2 = NetlistExtractor(parser2).extract()
+    x_lines_rt = [l for l in netlist2.split("\n") if l.strip().startswith("X")]
+    assert x_lines_rt, f"X1 dropped on round-trip:\n{netlist2}"
+    pins_rt = x_lines_rt[0].split()[1:-1]
+    expected = ["INA", "INB", "OUTA", "OUTB", "VCC", "0"]
+    assert pins_rt == expected, (
+        f"multi-pin SUBCIRCUIT pin order drifted on round-trip without .asy:\n"
+        f"  expected:   {expected}\n"
+        f"  round-trip: {pins_rt}"
+    )
+
+
 def test_subckt_body_round_trip():
     """.subckt body must survive .cir -> .asc -> .cir byte-equal.
 
