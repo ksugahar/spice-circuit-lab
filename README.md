@@ -57,7 +57,7 @@ pip install "ltspice-converter[mcp] @ git+https://github.com/ksugahar/ltspice-co
 Pinning a specific version:
 
 ```bash
-pip install git+https://github.com/ksugahar/ltspice-converter@v0.3.13
+pip install git+https://github.com/ksugahar/ltspice-converter@v0.4.0
 ```
 
 For development:
