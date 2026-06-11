@@ -74,15 +74,21 @@ def netlist_to_asc(netlist: str,
 
 @mcp.tool()
 def asc_to_netlist(asc_text: str,
-                   use_ltspice: bool = False,
+                   use_ltspice: Optional[bool] = None,
                    asy_search_dirs: Optional[List[str]] = None) -> str:
     """Convert an LTspice schematic (.asc) to a SPICE netlist.
 
     Args:
         asc_text: LTspice .asc schematic text.
-        use_ltspice: If True and LTspice.exe is detected, use LTspice's
-            -netlist mode for canonical anonymous-node numbering. Default
-            False (pure-Python, no external dependency).
+        use_ltspice: backend selection.
+            - ``None`` (default): **auto** — use LTspice's own
+              ``-netlist`` when LTspice.exe is installed (canonical,
+              ground-truth topology), else fall back to the pure-Python
+              extractor. Best fidelity where LTspice exists; portable
+              everywhere.
+            - ``True``: force LTspice (falls back on error).
+            - ``False``: force pure-Python (deterministic, no LTspice
+              dependency).
         asy_search_dirs: optional list of vendor `.asy` search dirs.
 
     Returns:
@@ -95,7 +101,8 @@ def asc_to_netlist(asc_text: str,
 
 @mcp.tool()
 def check_circuit(text: str, fmt: str,
-                  asy_search_dirs: Optional[List[str]] = None) -> dict:
+                  asy_search_dirs: Optional[List[str]] = None,
+                  use_ltspice: bool = False) -> dict:
     """Lint a circuit: round-trip drift + static netlist checks.
 
     Same logic as the ``ltspice-convert --check`` CLI command, exposed
@@ -107,23 +114,32 @@ def check_circuit(text: str, fmt: str,
             for ``fmt='cir'``, Python script for ``fmt='py'``).
         fmt: one of ``'asc'``, ``'cir'``, ``'py'``.
         asy_search_dirs: optional list of vendor `.asy` search dirs.
+        use_ltspice: backend for the asc round-trip extraction.
+            ``False`` (default) = pure-Python on both ends, so the check
+            is deterministic and measures the converter's own
+            self-consistency. Pass ``True`` to validate against LTspice's
+            canonical netlister instead (requires LTspice installed).
 
     Returns:
         Dict with keys:
 
         - ``ok`` (bool): True iff no warnings.
         - ``info`` (list[str]): informational messages
-          (round-trip component counts, etc.).
+          (round-trip component counts, topology verdict, etc.).
         - ``warnings`` (list[str]): things the user should fix —
-          component-count drift, unparsed lines, orphan/undefined
-          `.model` references, duplicate instance names, floating
-          nodes, undefined ``{PARAM}`` references, etc.
+          component-count drift, topology drift, unparsed lines,
+          orphan/undefined `.model` references, duplicate instance
+          names, floating nodes, undefined ``{PARAM}`` references, etc.
 
     Example agent workflow: after generating a netlist, call
     ``check_circuit(netlist, 'cir')`` and refuse to ship the netlist
     if ``warnings`` is non-empty.
     """
-    info, warn = _cli.check_text(text, fmt, asy_search_dirs)
+    try:
+        info, warn = _cli.check_text(text, fmt, asy_search_dirs,
+                                     use_ltspice=use_ltspice)
+    except Exception as e:
+        return {'ok': False, 'info': [], 'warnings': [f'{type(e).__name__}: {e}']}
     return {'ok': not warn, 'info': info, 'warnings': warn}
 
 
@@ -150,6 +166,39 @@ def info_circuit(text: str, fmt: str,
         - ``subckt_blocks``
     """
     return _cli.info_text(text, fmt, asy_search_dirs)
+
+
+@mcp.tool()
+def compare_topology(netlist_a: str, netlist_b: str) -> dict:
+    """Check whether two SPICE netlists have the same connectivity.
+
+    Node-rename-invariant: anonymous node renumbering (``N001`` vs
+    ``net3``) and benign R/C/L pin swaps do NOT count as a difference;
+    only genuine rewiring does. Use this to confirm an edit changed
+    *only* what you intended -- e.g. after changing a resistor value,
+    ``compare_topology(before, after)`` should return ``equivalent:
+    true``. If you moved a wire, it returns ``false``.
+
+    Args:
+        netlist_a: first SPICE netlist text.
+        netlist_b: second SPICE netlist text.
+
+    Returns:
+        Dict with keys:
+
+        - ``equivalent`` (bool): True iff the two circuits are the same
+          up to node renaming.
+        - ``components_a`` / ``components_b`` (int): component counts.
+        - ``pin_incidences_a`` / ``pin_incidences_b`` (int): total
+          pin-to-node connections on each side (a quick tell for added
+          or dropped pins).
+    """
+    from .topology import topology_equivalent
+    try:
+        equal, info = topology_equivalent(netlist_a, netlist_b)
+    except Exception as e:
+        return {'equivalent': False, 'error': f'{type(e).__name__}: {e}'}
+    return {'equivalent': equal, **info}
 
 
 def main() -> int:

@@ -5,6 +5,159 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-06-11
+
+### Changed (J1: LTspice's own netlister is now the default extraction backend)
+
+When `LTspice.exe` is installed, `asc_to_netlist` and the CLI now use
+**LTspice's own `-netlist`** by default (auto), falling back to the
+pure-Python extractor only when LTspice is absent. LTspice is the
+ground truth for its own format, so this is the most faithful option;
+it degrades gracefully everywhere else.
+
+- `asc_to_netlist(asc, use_ltspice=None)` — `None` (new default) = auto,
+  `True` = force LTspice, `False` = force pure-Python (deterministic).
+- CLI: `--use-ltspice` / `--no-ltspice` (default auto).
+- **Linting stays deterministic**: `check_circuit` / `--check` still
+  default to the pure-Python round-trip (it measures the converter's
+  self-consistency); pass `use_ltspice=True` / `--use-ltspice` to lint
+  against LTspice instead.
+
+How much the pure-Python path diverged from LTspice was invisible until
+now because the round-trip ran pure-Python on *both* ends, cancelling
+consistent bugs. Auditing the pure-Python extractor against LTspice as
+an oracle (new `bench`) surfaced several real bugs — fixed below.
+
+### Fixed (encoding: BOM-less UTF-16 .asc silently read as empty)
+
+LTspice ships some schematics (e.g. the bundled `UniversalOpAmp*.asc`)
+as **UTF-16 without a BOM**. The old reader only special-cased the
+`0xFF 0xFE` BOM, so a BOM-less UTF-16 file decoded as UTF-8 into a
+NUL-riddled string where `Version` / `SHEET` / `WIRE` never matched —
+the schematic read as **empty** and silently produced a 0-component
+netlist. New shared decoder `ltspice_converter._shared.decode_asc_bytes`
+handles UTF-16 LE/BE (with or without BOM), UTF-8, and cp1252/latin-1,
+and is used by both the CLI reader and the parser.
+
+### Fixed (extraction fidelity vs LTspice — oracle-driven)
+
+Audited against LTspice on the bundled "Examples" corpus, pure-Python
+forward extraction matched LTspice's canonical topology only **55 %**
+of the time. Four systematic bugs fixed:
+
+- **Jumpers were emitted as components.** A `jumper` (net-tie) symbol is
+  a zero-ohm short: its two pins now merge into one net and the symbol
+  is dropped, matching LTspice (which removes it and merges the nodes).
+- **Inline subcircuit parameters were mis-read as pins.** LTspice opamps
+  netlist as `X1 in out V+ V- o level2 Avol=1Meg GBW=10Meg Rin=500Meg`;
+  the parser took the last token as the subckt name, turning every
+  `param=value` into a phantom node. It now splits nodes from the
+  `key=value` parameter tail and finds the real subckt name.
+- **Special-function `A` devices were mangled into `X§A…`.** An
+  InstName starting with `A` (sample&hold, varistor, phase detector,
+  modulator, Schmitt, …) is now kept as a real `A<n> …` line instead of
+  being rewritten to a generic subcircuit, so it round-trips the same
+  way LTspice writes it.
+- **Symbol SPICE class is read from the `.asy` `SYMATTR Prefix`.** A
+  symbol that is unmapped, or only generically mapped to `X`, now adopts
+  the SPICE class LTspice itself declares for it — e.g. a crystal
+  (`xtal`, `SYMATTR Prefix C`) netlists as a capacitor, not a generic
+  subcircuit. (New `AsyParser.get_symbol_attr`.)
+
+Result on the Examples corpus: strict topology match **55 % → 71 %**,
+and **88 %** of circuits now have provably-correct wiring (the rest
+differ only in the cosmetic op-amp class label `U` vs `X`, or are the
+documented multi-pin-vendor-symbol case that needs the symbol's `.asy`
+pin geometry — now covered for free by the LTspice backend). The
+pure-Python self-round-trip is unchanged-or-better on every corpus
+(Examples 92 → 94 %, Applications 97 %, GitHub 79 %, textbook 100 %).
+
+### Fixed (LTspice modal dialogs blocked / flashed during `-netlist`)
+
+Some schematics make `LTspice.exe -netlist` pop a **blocking** Yes/No/
+Cancel message box — most commonly *"Duplicate overlapping components
+found: C1 and C2 ..Delete?"*. Left alone it stalled the call for the
+full timeout **and** flashed on the user's screen during batch
+conversions. `_ltspice_emit_netlist` now runs a background watchdog
+that auto-dismisses any LTspice modal owned by the spawned process,
+clicking **No** (keep the components — netlist the schematic exactly as
+drawn, never let LTspice modify it). On timeout the whole process tree
+is killed so nothing is left orphaned. A "duplicate overlapping" case
+that previously hung for 30 s now returns in ~2 s with both components
+intact.
+
+### Added
+
+- `tests/test_ltspice_backend.py` (LTspice-gated: headless `-netlist`,
+  backend agreement, the overlapping-dialog watchdog, no-orphan check,
+  BOM-less UTF-16), `tests/conftest.py` (pins the suite to the
+  deterministic pure-Python backend), `tests/test_extractor_fixes.py`
+  (jumper / A-device, lib.zip-gated), and topology/subckt-param
+  regression tests.
+- `bench/baseline.py` gains an LTspice-as-oracle audit column.
+
+## [0.3.14] — 2026-06-11
+
+### Added (I1: node-rename-invariant topology check)
+
+The round-trip metrics so far — component **count** and **GND-pin
+position** — are necessary but not sufficient.  A circuit can keep
+every component and every ground connection yet have its internal
+wiring scrambled.  This is exactly what happens to a multi-pin vendor
+symbol whose `.asy` is missing from the search path: it round-trips
+with a different (often inflated) pin list, and the count check still
+reports **100 % clean**.
+
+New module `ltspice_converter.topology` collapses a netlist to a hash
+that depends only on *how things are connected*, not on what the nodes
+are named (Weisfeiler-Leman 1-WL colour refinement on the
+component↔node incidence graph, with ground anchored and R/C/L pins
+treated as unordered).  Two public functions:
+
+- `topology_signature(netlist) -> str`
+- `topology_equivalent(netlist_a, netlist_b) -> (bool, info)`
+
+1-WL never colours two genuinely isomorphic graphs differently, so the
+check has **no false alarms**: it never reports drift on a circuit that
+actually round-tripped correctly.
+
+Wired in two places:
+
+- **`check_circuit` / `ltspice-convert --check`** now emit a
+  `topology drift: node connectivity is NOT preserved on round-trip`
+  warning (with the pin-incidence delta) — turning a previously
+  silent corruption into an actionable signal for AI agents.
+- **New MCP tool `compare_topology(netlist_a, netlist_b)`** — answers
+  *"did my edit change the wiring?"*  Invariant to node renaming and
+  benign R/C/L pin swaps, so after a value edit it returns
+  `equivalent: true`; after an accidental rewire, `false`.
+
+### Measured (what the new metric reveals)
+
+`.asc → netlist → .asc → netlist` topology preservation, full corpora:
+
+| Corpus | files | count match | **topology match** |
+|---|---:|---:|---:|
+| textbook              |  110 | 100 % | **100 %** |
+| LTspice Applications  | 4099 | 100 % | **96.9 %** |
+| LTspice Examples      |  100 | 99 %  | **92.0 %** |
+| GitHub repos (unseen) |  720 | 100 % | **79.3 %** |
+
+Every topology failure across all corpora involves an `X`/`U`/`S`/`T`
+(vendor / multi-pin / switch / transmission-line) symbol — **zero**
+pure-standard-element circuits (R/C/L/V/I/D/Q/M/J) drift.  So standard
+schematics round-trip with perfect connectivity, and the check tells an
+agent exactly when it is in the documented "keep the original `.asc` as
+source of truth" regime (vendor symbol without `.asy`) versus the safe
+regime.
+
+### Added
+
+- `tests/test_topology.py` — 9 regression tests (rename invariance,
+  symmetric pin-swap tolerance, real-rewire / diode-flip / ground
+  detection, value-edit preserves topology, pin-incidence reporting).
+- `bench/baseline.py` gains a `roundtrip_topology_match` column.
+
 ## [0.3.13] — 2026-05-20
 
 ### Fixed (H2: transmission lines dropped on schemdraw round-trip)

@@ -58,16 +58,25 @@ def netlist_to_asc(netlist: str,
     return converter.convert_string(netlist)
 
 
-def asc_to_netlist(asc_text: str, use_ltspice: bool = False,
+def asc_to_netlist(asc_text: str, use_ltspice=None,
                    asy_search_dirs=None) -> str:
     """Convert an LTspice schematic (.asc) text to a SPICE netlist.
 
     Args:
         asc_text: LTspice .asc schematic text.
-        use_ltspice: If True and LTspice.exe is detected, use LTspice
-            -netlist as the backend (canonical anonymous-node numbering).
-            Default False (pure-Python NetlistExtractor, no external
-            dependency, machine-reproducible).
+        use_ltspice: backend selection.
+
+            - ``None`` (default): **auto** — use LTspice's own
+              ``-netlist`` when ``LTspice.exe`` is installed (canonical,
+              ground-truth topology and anonymous-node numbering), and
+              transparently fall back to the pure-Python extractor when
+              it is not. This is the most faithful option on a machine
+              with LTspice and still works everywhere.
+            - ``True``: force the LTspice backend (errors fall back to
+              pure-Python).
+            - ``False``: force the pure-Python NetlistExtractor (no
+              external dependency, byte-for-byte reproducible across
+              machines — use this in CI or when you need determinism).
         asy_search_dirs: optional list of directory paths for vendor
             `.asy` symbol files.
 
@@ -88,6 +97,8 @@ def asc_to_netlist(asc_text: str, use_ltspice: bool = False,
             [_Path(d) for d in asy_search_dirs]
             if asy_search_dirs else None
         )
+        # use_ltspice=None propagates to prefer_ltspice=None, which the
+        # low-level impl resolves to "auto" (LTspice if available).
         return _impl(tmp_path, prefer_ltspice=use_ltspice,
                      asy_search_dirs=_dirs)
     finally:

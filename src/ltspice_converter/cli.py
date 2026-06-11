@@ -69,17 +69,10 @@ def detect_format(path: Path) -> Optional[str]:
 
 
 def read_text(path: Path) -> str:
-    """Read .asc / .cir / .py text. Handles LTspice 17+ UTF-16 LE .asc files."""
-    raw = path.read_bytes()
-    if raw[:2] == b'\xff\xfe':
-        return raw.decode('utf-16-le')
-    # asc / cir / py are typically latin-1 or utf-8
-    for enc in ('utf-8', 'latin-1'):
-        try:
-            return raw.decode(enc)
-        except UnicodeDecodeError:
-            continue
-    return raw.decode('utf-8', errors='replace')
+    """Read .asc / .cir / .py text. Handles every LTspice encoding,
+    including BOM-less UTF-16 (see :func:`_shared.decode_asc_bytes`)."""
+    from ._shared import decode_asc_bytes
+    return decode_asc_bytes(path.read_bytes())
 
 
 def write_text(path: Path, content: str, fmt: str) -> None:
@@ -97,19 +90,24 @@ def write_text(path: Path, content: str, fmt: str) -> None:
 
 def convert(src_text: str, src_fmt: str, dst_fmt: str,
             name: str = 'circuit',
-            asy_search_dirs: Optional[List[str]] = None) -> str:
+            asy_search_dirs: Optional[List[str]] = None,
+            use_ltspice=None) -> str:
     """Dispatch any-to-any conversion.
 
     src_fmt / dst_fmt ∈ {asc, cir, py}.
+
+    ``use_ltspice``: backend for the asc->netlist step. ``None`` = auto
+    (LTspice if installed, else pure-Python); ``True``/``False`` force.
     """
     if src_fmt == dst_fmt:
         return src_text
 
     # ASC -> *
     if src_fmt == 'asc':
-        ap = AscParser(asy_search_dirs=[Path(d) for d in (asy_search_dirs or [])] or None)
-        ap.parse_string(src_text)
-        netlist = NetlistExtractor(ap).extract()
+        # asc_to_netlist honours use_ltspice (None=auto) and falls back
+        # to the pure-Python extractor when LTspice is unavailable.
+        netlist = conversion.asc_to_netlist(
+            src_text, use_ltspice=use_ltspice, asy_search_dirs=asy_search_dirs)
         if dst_fmt == 'cir':
             return netlist
         if dst_fmt == 'py':
@@ -202,7 +200,8 @@ def cmd_convert(args) -> int:
             src_text = read_text(inp)
             result = convert(src_text, src_fmt, tgt_fmt,
                              name=inp.stem,
-                             asy_search_dirs=args.asy_dir)
+                             asy_search_dirs=args.asy_dir,
+                             use_ltspice=args.use_ltspice)
             write_text(out_path, result, tgt_fmt)
             print(f'{inp} -> {out_path}  ({len(result)} bytes)')
 
@@ -259,6 +258,34 @@ def _count_components(netlist: str) -> int:
         if s and s[0].isalpha() and not s.startswith('*') and not s.startswith('.'):
             n += 1
     return n
+
+
+def _append_topology_warning(nl_before: str, nl_after: str,
+                             info: List[str], warn: List[str]) -> None:
+    """Compare connectivity across a round-trip and record the verdict.
+
+    Uses the node-rename-invariant topology signature, so legitimate
+    node renaming (the converter renumbers anonymous nodes) and benign
+    R/C/L pin swaps do not trip it -- only genuine rewiring does. On
+    real-world corpora the drift this catches is concentrated in
+    multi-pin vendor symbols whose `.asy` is not on the search path
+    (set LTSPICE_ASY_SEARCH_PATH / --asy-dir to resolve them).
+    """
+    from .topology import topology_equivalent
+    equal, ti = topology_equivalent(nl_before, nl_after)
+    if equal:
+        info.append('topology (connectivity) preserved on round-trip')
+        return
+    detail = ''
+    if ti['pin_incidences_a'] != ti['pin_incidences_b']:
+        detail = (f' (pin connections {ti["pin_incidences_a"]} -> '
+                  f'{ti["pin_incidences_b"]})')
+    warn.append(
+        'topology drift: node connectivity is NOT preserved on round-trip'
+        + detail
+        + ' -- usually a multi-pin vendor symbol with no resolvable .asy; '
+        'keep the original as source of truth or set LTSPICE_ASY_SEARCH_PATH'
+    )
 
 
 def _gnd_pin_positions(netlist: str) -> dict:
@@ -562,7 +589,8 @@ def _looks_like_standard_model(name: str) -> bool:
 
 
 def check_text(src_text: str, src_fmt: str,
-                asy_search_dirs: Optional[List[str]] = None
+                asy_search_dirs: Optional[List[str]] = None,
+                use_ltspice=False,
                 ) -> Tuple[List[str], List[str]]:
     """Run --check logic on in-memory text (no path / no file I/O).
 
@@ -577,6 +605,11 @@ def check_text(src_text: str, src_fmt: str,
         asy_search_dirs: optional list of directory paths for vendor `.asy`
             symbol resolution (combined with ``LTSPICE_ASY_SEARCH_PATH``
             env var by the AscParser/NetlistToAsc layer).
+        use_ltspice: backend for the asc round-trip extraction.
+            ``False`` (default) = pure-Python on both ends (deterministic);
+            ``None`` = auto (LTspice if installed); ``True`` = force
+            LTspice. The CLI ``--check`` passes the ``--use-ltspice`` /
+            ``--no-ltspice`` choice (auto by default).
     """
     info: List[str] = []
     warn: List[str] = []
@@ -590,7 +623,11 @@ def check_text(src_text: str, src_fmt: str,
     if src_fmt == 'asc':
         ap = AscParser(asy_search_dirs=[Path(d) for d in asy_search_dirs] or None)
         ap.parse_string(src_text)
-        nl1 = NetlistExtractor(ap).extract()
+        # nl1 via the selected backend (auto/LTspice/pure-Python); the
+        # round-trip below uses the SAME backend on both ends so the
+        # drift it reports is the converter's, not a backend mismatch.
+        nl1 = conversion.asc_to_netlist(
+            src_text, use_ltspice=use_ltspice, asy_search_dirs=asy_search_dirs)
         n1 = _count_components(nl1)
         info.append(f'asc -> netlist: {n1} components extracted')
         # Probe each SYMBOL for .asy availability — but only flag those
@@ -622,12 +659,11 @@ def check_text(src_text: str, src_fmt: str,
                 + (' ...' if len(unresolved) > 5 else '')
             )
 
-        # Round-trip
+        # Round-trip (same backend as nl1 for an apples-to-apples compare)
         from .parser.netlist_to_asc import NetlistToAsc
         asc2 = NetlistToAsc(asy_search_dirs=asy_search_dirs).convert_string(nl1)
-        ap2 = AscParser(asy_search_dirs=[Path(d) for d in asy_search_dirs] or None)
-        ap2.parse_string(asc2)
-        nl2 = NetlistExtractor(ap2).extract()
+        nl2 = conversion.asc_to_netlist(
+            asc2, use_ltspice=use_ltspice, asy_search_dirs=asy_search_dirs)
         n2 = _count_components(nl2)
         info.append(f'asc -> netlist -> asc -> netlist: {n2} components')
         if n1 != n2:
@@ -640,6 +676,12 @@ def check_text(src_text: str, src_fmt: str,
             warn.append(f'GND-pin position drift on {gnd_drift} component(s)')
         else:
             info.append('GND-pin positions preserved on common components')
+
+        # Topology: node-rename-invariant connectivity check. Strictly
+        # stronger than the count + GND-pin proxies above -- it catches
+        # silent rewiring (almost always a multi-pin vendor symbol whose
+        # .asy is missing from the search path). See _append_topology_warning.
+        _append_topology_warning(nl1, nl2, info, warn)
 
         # C5: static netlist checks on the extracted netlist
         for w in static_checks(nl1):
@@ -657,13 +699,14 @@ def check_text(src_text: str, src_fmt: str,
             warn.append(_format_unparsed_line(lno, line))
 
         asc = NetlistToAsc(asy_search_dirs=asy_search_dirs).convert_string(src_text)
-        ap = AscParser(asy_search_dirs=[Path(d) for d in asy_search_dirs] or None)
-        ap.parse_string(asc)
-        nl2 = NetlistExtractor(ap).extract()
+        nl2 = conversion.asc_to_netlist(
+            asc, use_ltspice=use_ltspice, asy_search_dirs=asy_search_dirs)
         n2 = _count_components(nl2)
         info.append(f'netlist -> asc -> netlist: {n2} components')
         if n1 != n2:
             warn.append(f'component count drift: {n1} -> {n2}')
+        # Topology: node-rename-invariant connectivity check (see above).
+        _append_topology_warning(src_text, nl2, info, warn)
         # C5: static checks on the source netlist
         for w in static_checks(src_text):
             warn.append(w)
@@ -679,12 +722,14 @@ def check_text(src_text: str, src_fmt: str,
     return info, warn
 
 
-def _check_one(path: Path, asy_search_dirs: List[str]) -> Tuple[List[str], List[str]]:
+def _check_one(path: Path, asy_search_dirs: List[str],
+               use_ltspice=False) -> Tuple[List[str], List[str]]:
     """File-based wrapper around :func:`check_text` (used by the CLI)."""
     src_fmt = detect_format(path)
     if src_fmt is None:
         return [], [f'unknown source extension {path.suffix!r}']
-    return check_text(read_text(path), src_fmt, asy_search_dirs)
+    return check_text(read_text(path), src_fmt, asy_search_dirs,
+                      use_ltspice=use_ltspice)
 
 
 def cmd_check(args) -> int:
@@ -697,7 +742,12 @@ def cmd_check(args) -> int:
             any_err = True
             continue
         try:
-            info, warn = _check_one(inp, args.asy_dir)
+            # Linting defaults to the deterministic pure-Python round-trip
+            # (it measures the converter's self-consistency); opt into the
+            # LTspice backend only with an explicit --use-ltspice.
+            _check_uls = args.use_ltspice if args.use_ltspice is not None else False
+            info, warn = _check_one(inp, args.asy_dir,
+                                    use_ltspice=_check_uls)
             print(f'== {inp} ==')
             for m in info:
                 print(f'  [ok]   {m}')
@@ -883,6 +933,18 @@ Examples:
         '--asy-dir', action='append', default=[], metavar='DIR',
         help='additional .asy search directory (repeatable); merged with '
              'the LTSPICE_ASY_SEARCH_PATH env var, CLI flags take priority',
+    )
+    p.add_argument(
+        '--use-ltspice', dest='use_ltspice', action='store_true',
+        default=None,
+        help='force LTspice -netlist as the asc->netlist backend '
+             '(canonical, ground-truth topology). Default: auto-use '
+             'LTspice when installed, else pure-Python.',
+    )
+    p.add_argument(
+        '--no-ltspice', dest='use_ltspice', action='store_false',
+        help='force the pure-Python extractor (deterministic, no LTspice '
+             'dependency) even when LTspice is installed.',
     )
     p.add_argument(
         '--traceback', action='store_true',

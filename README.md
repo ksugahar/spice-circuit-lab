@@ -4,12 +4,25 @@
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://github.com/ksugahar/ltspice-converter)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-What's new in [v0.3.13](CHANGELOG.md): transmission-line (`T`) support
-on the schemdraw arm -- both round-trip arms now hit **100 %** on the
-three real-world corpora (count match).  v0.3.12 fixed multi-pin
-SUBCIRCUIT pin order (GND-pin metric 96.4 -> 98.9 %).  v0.3.11 fixed
-K-directive + multi-line `.subckt` (+13 pt Examples).  v0.3.10
-brought the `.asc <-> .cir` arm to 100 %.
+What's new in [v0.4.0](CHANGELOG.md): when **LTspice is installed it is
+now the default `.asc → netlist` backend** (its own `-netlist` is the
+ground truth — pure-Python remains the fallback and the deterministic
+opt-out via `--no-ltspice`). Auditing pure-Python against LTspice as an
+oracle fixed four real extraction bugs (jumper net-ties, inline
+subcircuit parameters mis-read as pins, special-function `A` devices,
+and reading a symbol's SPICE class from its `.asy` `Prefix`) plus a
+BOM-less-UTF-16 reader bug, lifting pure-Python's match-to-LTspice on
+the Examples corpus from 55 % to 71 % strict (88 % correct-wiring). v0.3.14 added a **node-rename-invariant
+topology check**.  Count and GND-pin metrics are saturated at ~100 %,
+but they are blind to *silent rewiring* — a multi-pin vendor symbol
+without its `.asy` round-trips with a scrambled pin list and the count
+check still says "clean".  The new check catches it (`check_circuit`
+gains a `topology drift` warning; new MCP tool `compare_topology`).
+Measured topology-match: textbook 100 %, Applications 96.9 %, Examples
+92.0 %, unseen GitHub repos 79.3 % — see
+[docs/BENCHMARKS.md](docs/BENCHMARKS.md).  Earlier: v0.3.13 added
+transmission-line (`T`) support; v0.3.10–0.3.12 brought the
+`.asc <-> .cir` arm and GND-pin topology to ~100 / 99 %.
 
 Convert between three circuit representations:
 
@@ -17,9 +30,14 @@ Convert between three circuit representations:
    LTspice .asc  <---->  SPICE .cir  <---->  schemdraw Python script
 ```
 
-Pure-Python — LTspice.exe is optional (used only for canonical anonymous-node
-numbering when available). Built for AI agents to round-trip circuits between
-schematic and netlist forms without launching LTspice.
+Works without LTspice (pure-Python), but **uses LTspice's own
+`-netlist` automatically when LTspice.exe is installed** — that is the
+ground truth for its own `.asc` format, so `.asc → netlist` extraction
+is canonical (correct vendor-symbol topology, jumpers and special
+functions handled exactly as LTspice does). Set `use_ltspice=False`
+(or `--no-ltspice`) to force the deterministic pure-Python path. Built
+for AI agents to round-trip circuits between schematic and netlist
+forms.
 
 ## Install
 
@@ -71,9 +89,11 @@ recovered = lc.schemdraw_to_netlist(script, title="rc")
 # SPICE netlist -> LTspice .asc text
 asc_text = lc.netlist_to_asc(netlist)
 
-# LTspice .asc text -> SPICE netlist (pure-Python; pass use_ltspice=True
-# to use LTspice.exe for canonical anonymous-node numbering)
+# LTspice .asc text -> SPICE netlist. use_ltspice=None (default) auto-uses
+# LTspice.exe when installed (canonical, ground-truth topology) and falls
+# back to pure-Python otherwise. Force with use_ltspice=True / False.
 recovered_netlist = lc.asc_to_netlist(asc_text)
+deterministic   = lc.asc_to_netlist(asc_text, use_ltspice=False)
 ```
 
 ## Command-line tool
@@ -95,6 +115,10 @@ ltspice-convert input.asc --to py             # writes input.py alongside
 
 # Batch (output is a directory; --to picks target format)
 ltspice-convert *.asc -o build/ --to cir
+
+# Backend for .asc -> netlist: default auto-uses LTspice when installed.
+ltspice-convert input.asc -o output.cir --no-ltspice   # force pure-Python
+ltspice-convert input.asc -o output.cir --use-ltspice  # force LTspice
 ```
 
 ### Round-trip check (lint mode)
@@ -109,6 +133,12 @@ ltspice-convert --check input.asc
 
 ltspice-convert --check --strict *.asc        # exit 1 if any warning
 ```
+
+The round-trip arm reports three drift signals: **component count**,
+**GND-pin position**, and — as of v0.3.14 — **topology**
+(node-rename-invariant connectivity). The topology line is the one that
+catches a multi-pin vendor symbol whose `.asy` is missing: the count
+stays right but the wiring changes.
 
 Static netlist checks `--check` runs (in addition to round-trip):
 
@@ -168,19 +198,27 @@ Install with the `[mcp]` extra and add to your MCP client config:
 }
 ```
 
-Exposes six tools:
+Exposes seven tools:
 
 | Tool | Purpose |
 |---|---|
 | `netlist_to_schemdraw(netlist, name)` | SPICE → schemdraw Python script |
 | `schemdraw_to_netlist(script, title)` | schemdraw script → SPICE |
 | `netlist_to_asc(netlist, asy_search_dirs?)` | SPICE → LTspice `.asc` |
-| `asc_to_netlist(asc_text, use_ltspice?, asy_search_dirs?)` | LTspice `.asc` → SPICE |
-| `check_circuit(text, fmt, asy_search_dirs?)` | Lint: round-trip drift + static netlist checks. Returns `{ok, info, warnings}`. |
+| `asc_to_netlist(asc_text, use_ltspice?, asy_search_dirs?)` | LTspice `.asc` → SPICE (`use_ltspice` defaults to auto: LTspice if installed, else pure-Python) |
+| `check_circuit(text, fmt, asy_search_dirs?)` | Lint: round-trip drift (count, GND-pin, **topology**) + static netlist checks. Returns `{ok, info, warnings}`. |
 | `info_circuit(text, fmt, asy_search_dirs?)` | Summary: component counts, symbol kinds, `.subckt` blocks. |
+| `compare_topology(netlist_a, netlist_b)` | Node-rename-invariant connectivity diff of two netlists. Returns `{equivalent, ...}`. |
 
 Typical agent loop: generate netlist → `check_circuit(..., 'cir')` →
 if `warnings` non-empty, fix and re-check → only ship when clean.
+
+`compare_topology` answers a different question — *"did my edit change
+the wiring?"*  It is invariant to node renaming and benign R/C/L pin
+swaps, so after changing a component value
+`compare_topology(before, after)` returns `equivalent: true`; if you
+accidentally moved a wire it returns `false`.  Use it to confirm an
+edit touched only what you intended.
 
 ## End-to-end workflow: AI-assisted circuit editing
 

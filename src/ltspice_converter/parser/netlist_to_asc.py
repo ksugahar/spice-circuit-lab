@@ -325,21 +325,42 @@ class NetlistParser:
             # K文はコンポーネントではなくディレクティブとして扱う
             return None
         elif comp_type == ComponentType.SUBCIRCUIT:
-            # X name node1 node2 ... subckt_name (variable pin count)
-            if len(parts) >= 4:
-                node_pos = parts[1]
-                node_neg = parts[2]
-                value = parts[-1]  # 最後がサブサーキット名
-                # Pin 3..N-1 を extra_nodes として保持 (multi-pin vendor IC)
-                extra_nodes = parts[3:-1]
-            elif len(parts) == 3:
-                # 2-pin: X1 N1 N2 (no model) — rare but valid
-                node_pos = parts[1]
-                node_neg = parts[2]
-                value = ''
-                extra_nodes = []
+            # X<name> <node>... <subckt_name> [param=value ...]
+            # Inline parameters (LTspice opamps emit e.g.
+            #   X1 in out V+ V- o level2 Avol=1Meg GBW=10Meg Rin=500Meg)
+            # are NOT pins. The subckt name is the last bare token before
+            # the first `key=value` token; everything before that is nodes,
+            # everything from it on is parameters. The old code took the
+            # very last token as the subckt name, mis-reading every
+            # parameter as a node (inflating pin count and topology).
+            body = parts[1:]
+            pidx = next((i for i, t in enumerate(body) if '=' in t), len(body))
+            pre = body[:pidx]          # nodes + subckt name (no params)
+            if pidx == len(body):
+                # No inline params — original semantics.
+                if len(pre) >= 3:      # >=2 nodes + subckt name
+                    node_pos = pre[0]
+                    node_neg = pre[1]
+                    extra_nodes = pre[2:-1]
+                    value = pre[-1]
+                elif len(pre) == 2:    # X1 N1 N2 (2 nodes, no model)
+                    node_pos = pre[0]
+                    node_neg = pre[1]
+                    value = ''
+                else:
+                    return None
             else:
-                return None
+                # Inline params present — subckt name = last bare token.
+                if len(pre) >= 2:      # >=1 node + subckt name
+                    nodes = pre[:-1]
+                    node_pos = nodes[0]
+                    # Leave node_neg empty for a 1-pin subckt rather than
+                    # fabricating a phantom ground ('0') connection.
+                    node_neg = nodes[1] if len(nodes) >= 2 else ''
+                    extra_nodes = nodes[2:]
+                    value = pre[-1]    # subckt name (params dropped)
+                else:
+                    return None
         elif comp_type in (ComponentType.VCVS, ComponentType.VCCS):
             # E/G: 4端子 (out+ out- ctrl+ ctrl- gain/Laplace)
             node_pos = parts[1]

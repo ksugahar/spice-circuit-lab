@@ -5,7 +5,84 @@ real-world LTspice circuits.  All numbers come from LAB-local
 benchmarks; the corpus itself is not redistributed (see [README §
 Project history & scope](../README.md)).
 
-## Headline results — v0.3.13 (current)
+## LTspice as ground-truth oracle — v0.4.0 (current)
+
+When `LTspice.exe` is installed the converter now extracts via LTspice's
+own `-netlist` by default. That also makes LTspice a **ground-truth
+oracle** for auditing the pure-Python fallback: for each `.asc`, compare
+`asc_to_netlist(use_ltspice=False)` against `asc_to_netlist(use_ltspice=True)`
+under the node-rename-invariant topology signature.
+
+On the bundled "Examples" corpus (100 files) the pure-Python extractor
+matched LTspice's canonical topology only **55 %** at the start. Four
+oracle-surfaced bugs were fixed:
+
+| Fix | What LTspice does that pure-Python didn't |
+|---|---|
+| jumper net-tie | merges the two pins into one node, drops the symbol |
+| inline subckt params | `X1 .. sub p=1 q=2` — `p=1`/`q=2` are params, not pins |
+| special-function `A` devices | emits `A<n> ..` (S&H, varistor, PLL, Schmitt, ...) |
+| `.asy` `SYMATTR Prefix` | classes a symbol by its own declared SPICE prefix (e.g. `xtal` → `C`) |
+
+Result on Examples: strict topology match **55 % → 71 %**; counting the
+op-amp `U`-vs-`X` class label (same wiring) as equivalent, **88 %** of
+circuits have provably-correct wiring. The residual is the documented
+multi-pin-vendor-symbol case (needs the symbol's `.asy` pin geometry) —
+which the LTspice backend now handles for free. Every fix was gated on
+zero self-round-trip regression across the full 4099-file Applications
+corpus.
+
+Reproduce on your own `.asc` corpus with the LAB harness
+`bench/baseline.py` (gitignored, not shipped — point its `CORPUS_ROOTS`
+at your files). Its `roundtrip_topology_match` column compares the
+pure-Python self-round-trip; the oracle audit lives in the same harness.
+
+## Topology (connectivity) preservation — v0.3.14
+
+Component **count** and **GND-pin position** are necessary but not
+sufficient round-trip metrics: a circuit can keep every component and
+every ground connection yet have its internal wiring scrambled.
+v0.3.14 adds a **node-rename-invariant topology signature**
+(`ltspice_converter.topology`, Weisfeiler-Leman 1-WL on the
+component↔node incidence graph) and measures it across the round-trip:
+
+| Corpus | files | count match | **topology match** |
+|---|---:|---:|---:|
+| textbook              |  110 | 100 %  | **100.0 %** |
+| LTspice Applications  | 4099 | 100 %  | **96.9 %** |
+| LTspice Examples      |  100 | 99 %   | **92.0 %** |
+| GitHub repos (unseen) |  720 | 100 %  | **79.3 %** |
+
+The gap between the count column (saturated at ~100 %) and the topology
+column is the *silent rewiring* the older metrics could not see. On the
+most diverse, fully-unseen corpus (GitHub repos) roughly **1 in 5**
+schematics has its connectivity altered by the round-trip while the
+count check still reports clean.
+
+**Every** topology failure across all four corpora involves an
+`X`/`U`/`S`/`T` symbol (vendor IC, multi-pin opamp, voltage-controlled
+switch, transmission line). **Zero** pure-standard-element circuits
+(R/C/L/V/I/D/Q/M/J) drift. Two takeaways:
+
+1. Standard schematics round-trip with **perfect** connectivity.
+2. The drift is exactly the documented multi-pin-vendor-symbol weakness
+   (a symbol whose `.asy` is not on the LTspice search path comes back
+   with a different pin list). Set `LTSPICE_ASY_SEARCH_PATH` /
+   `--asy-dir` to resolve it, or keep the original `.asc` as the source
+   of truth.
+
+`check_circuit` (MCP) and `ltspice-convert --check` now surface this as
+a `topology drift` warning, so an AI agent's "ship" decision can
+distinguish the safe regime from the unsafe one instead of trusting a
+count check that is blind to rewiring. The check has **no false
+alarms**: 1-WL never reports drift on a circuit that actually
+round-tripped correctly (textbook corpus: 110/110 clean).
+
+Reproduce against your own corpus with the LAB harness
+`bench/baseline.py` (gitignored, not shipped) — its
+`roundtrip_topology_match` column.
+
+## Headline results — v0.3.13
 
 Both round-trip arms now hit 100 % on all three real-world corpora
 (component-count match), and the GND-pin topology proxy clears 98 %

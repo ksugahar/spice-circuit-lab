@@ -54,13 +54,124 @@ def _find_ltspice_exe() -> Optional[str]:
     return None
 
 
-def _ltspice_emit_netlist(asc_path: str, ltspice_exe: str, timeout: float = 30.0) -> str:
+def _dismiss_ltspice_dialogs(pid: int) -> int:
+    """Dismiss visible modal dialogs owned by process ``pid``,
+    non-destructively. Windows-only; a no-op (returns 0) elsewhere.
+
+    ``LTspice.exe -netlist`` is normally headless, but some schematics
+    make it pop a blocking message box -- most commonly *"Duplicate
+    overlapping components found: C1 and C2 ..Delete?"* (Yes/No/Cancel).
+    Left alone it blocks the whole call until timeout **and** flashes on
+    the user's screen. We click **No** (keep the components, netlist the
+    schematic exactly as drawn -- never let LTspice silently modify it);
+    if there is no No button we fall back to Cancel, then to the
+    standard IDNO / IDCANCEL dialog commands.
+
+    Returns the number of dialogs dismissed.
+    """
+    import sys
+    if sys.platform != "win32":
+        return 0
+    import ctypes
+    from ctypes import wintypes
+
+    u = ctypes.windll.user32
+    WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND,
+                                     wintypes.LPARAM)
+    BM_CLICK = 0x00F5
+    WM_COMMAND = 0x0111
+    IDNO, IDCANCEL = 7, 2
+
+    def _text(hwnd) -> str:
+        buf = ctypes.create_unicode_buffer(256)
+        u.GetWindowTextW(hwnd, buf, 256)
+        return buf.value
+
+    def _cls(hwnd) -> str:
+        buf = ctypes.create_unicode_buffer(64)
+        u.GetClassNameW(hwnd, buf, 64)
+        return buf.value
+
+    dialogs: List[int] = []
+
+    def _top(hwnd, _):
+        if not u.IsWindowVisible(hwnd):
+            return True
+        if _cls(hwnd) != "#32770":          # standard dialog/message-box class
+            return True
+        wpid = wintypes.DWORD()
+        u.GetWindowThreadProcessId(hwnd, ctypes.byref(wpid))
+        if wpid.value == pid:
+            dialogs.append(hwnd)
+        return True
+
+    u.EnumWindows(WNDENUMPROC(_top), 0)
+
+    dismissed = 0
+    for dlg in dialogs:
+        buttons: List[tuple] = []
+
+        def _child(hwnd, _):
+            if _cls(hwnd).lower() == "button":
+                buttons.append((hwnd, _text(hwnd)))
+            return True
+
+        u.EnumChildWindows(dlg, WNDENUMPROC(_child), 0)
+
+        def _norm(s: str) -> str:
+            return s.replace("&", "").strip().lower()
+
+        clicked = False
+        for wants in (("no", "いいえ"), ("cancel", "キャンセル")):
+            for hwnd, txt in buttons:
+                if _norm(txt) in wants:
+                    u.SendMessageW(hwnd, BM_CLICK, 0, 0)
+                    clicked = True
+                    break
+            if clicked:
+                break
+        if not clicked:
+            # No recognisable safe button -- send the standard dialog
+            # commands (No, then Cancel) so a stuck dialog still closes.
+            u.SendMessageW(dlg, WM_COMMAND, IDNO, 0)
+            u.SendMessageW(dlg, WM_COMMAND, IDCANCEL, 0)
+        dismissed += 1
+    return dismissed
+
+
+def _kill_proc_tree(proc) -> None:
+    """Terminate a process and its children (so no orphaned LTspice
+    window/dialog is left behind on timeout)."""
+    import sys
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                           capture_output=True)
+        else:
+            proc.kill()
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
+def _ltspice_emit_netlist(asc_path: str, ltspice_exe: str,
+                          timeout: float = 20.0) -> str:
     """Use LTspice to convert .asc to canonical .net (LTspice's own naming).
 
     `LTspice.exe -netlist input.asc` writes `input.net` next to the .asc.
     We copy the .asc into a temp dir to avoid polluting the source tree.
-    Returns the .net text on success; raises RuntimeError on failure.
+
+    A background watchdog dismisses any LTspice modal dialog that pops up
+    during the run (e.g. the "duplicate overlapping components" prompt),
+    so the call stays headless and never blocks on -- or flashes -- a
+    Yes/No box. On timeout the whole process tree is killed so nothing is
+    left orphaned. Returns the .net text on success; raises RuntimeError
+    on failure (the caller falls back to the pure-Python extractor).
     """
+    import threading
+
     asc = Path(asc_path).resolve()
     if not asc.exists():
         raise FileNotFoundError(asc)
@@ -69,34 +180,54 @@ def _ltspice_emit_netlist(asc_path: str, ltspice_exe: str, timeout: float = 30.0
         asc_copy = work / asc.name
         # .asc files are commonly written in cp1252/latin-1; preserve byte-fidelity.
         asc_copy.write_bytes(asc.read_bytes())
-        proc = subprocess.run(
+
+        proc = subprocess.Popen(
             [ltspice_exe, "-netlist", str(asc_copy)],
-            capture_output=True,
-            timeout=timeout,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
-        if proc.returncode != 0:
-            raise RuntimeError(
-                f"LTspice -netlist failed (rc={proc.returncode}): "
-                f"{proc.stderr[:200]!r}"
-            )
+
+        stop = threading.Event()
+
+        def _watch():
+            # Poll for and dismiss LTspice modal dialogs while it runs.
+            while not stop.is_set():
+                try:
+                    _dismiss_ltspice_dialogs(proc.pid)
+                except Exception:
+                    pass
+                stop.wait(0.25)
+
+        watcher = threading.Thread(target=_watch, daemon=True)
+        watcher.start()
+        try:
+            proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _kill_proc_tree(proc)
+            try:
+                proc.communicate(timeout=5)
+            except Exception:
+                pass
+            raise RuntimeError(f"LTspice -netlist timed out after {timeout}s")
+        finally:
+            stop.set()
+            watcher.join(timeout=1.0)
+
         net = asc_copy.with_suffix(".net")
         if not net.exists():
+            # LTspice sometimes returns nonzero even on success, so the
+            # .net file (not the exit code) is the real success signal.
             raise RuntimeError(
-                f"LTspice -netlist did not produce {net.name}"
+                f"LTspice -netlist did not produce {net.name} "
+                f"(rc={proc.returncode})"
             )
-        # LTspice 26+ writes .net in UTF-8 (e.g. `µ` as 0xC2 0xB5).
-        # Earlier we read as latin-1, which silently corrupted µ into
-        # `Â`+`µ`, so a `.tran 250µ startup` directive became
-        # `.tran 250Âµ startup` after the round-trip — LTspice then
-        # parsed the µ-suffix as no-suffix (250 *seconds* instead of
-        # 250 microseconds), dilating the .raw time axis 10⁶×.
-        # Try UTF-8 first; fall back to latin-1 only if the bytes
-        # aren't valid UTF-8 (older LTspice or 8-bit-clean writers).
-        raw = net.read_bytes()
-        try:
-            return raw.decode("utf-8")
-        except UnicodeDecodeError:
-            return raw.decode("latin-1", errors="replace")
+        # Decode the .net robustly. LTspice 26 writes UTF-8 (`µ` as
+        # 0xC2 0xB5); older versions wrote cp1252/latin-1 (a bare 0xB5),
+        # and some emit UTF-16. The shared decoder handles all of them in
+        # one place (a stray latin-1 read once corrupted `250µ` into
+        # `250Âµ`, which LTspice then parsed as 250 *seconds*, dilating
+        # the .raw time axis 10⁶×).
+        from .._shared import decode_asc_bytes
+        return decode_asc_bytes(net.read_bytes())
 
 
 # =============================================================================
@@ -351,6 +482,17 @@ THREE_TERMINAL_SYMBOLS = {
 # 受動素子のみ（旧定義 — 後方互換）
 PASSIVE_SYMBOLS = {'res', 'cap', 'ind', 'ind2', 'voltage', 'current'}
 
+# Zero-ohm "short" symbols: net-ties whose two pins LTspice merges into a
+# single node, dropping the symbol from the netlist. The extractor unions
+# their pins (see _build_net_groups) and emits no component for them.
+_SHORT_SYMBOLS = {'jumper'}
+
+# Single-letter SPICE element classes we accept from a symbol's
+# ``SYMATTR Prefix`` when the symbol is not in the hardcoded SYMBOL_TO_SPICE
+# map. Excludes A/K/U (special-function / coupling / opamp) which have their
+# own dedicated handling.
+_SPICE_CLASS_LETTERS = set('RCLVIDQMJEFGHBSTX')
+
 # ラウンドトリップ可能な全シンボルタイプ
 SUPPORTED_SYMBOLS = TWO_TERMINAL_SYMBOLS | THREE_TERMINAL_SYMBOLS
 
@@ -400,6 +542,7 @@ class AsyParser:
     # Cache: symbol_path -> list of AsyPin (sorted by SpiceOrder)
     _cache: Dict[str, Optional[List[AsyPin]]] = {}
     _model_cache: Dict[str, str] = {}  # symbol_path -> SpiceModel name
+    _attr_cache: Dict[str, str] = {}   # 'symbol_path|attr:Name|dirs' -> value
     _zip_file: Optional[zipfile.ZipFile] = None
     _zip_path: Optional[Path] = None
 
@@ -675,6 +818,72 @@ class AsyParser:
         cls._model_cache[cache_key] = result
         return result
 
+    @classmethod
+    def get_symbol_attr(cls, symbol_path: str, attr: str,
+                        search_dirs: Optional[List[Path]] = None) -> str:
+        """Read a single ``SYMATTR <attr>`` value from the symbol's .asy.
+
+        LTspice symbols declare their SPICE class and default model via
+        ``SYMATTR Prefix`` / ``SYMATTR Value`` (e.g. ``xtal`` carries
+        ``Prefix C``, ``TowTom2`` carries ``Prefix X`` + ``Value TowTom2``).
+        Returns ``''`` when the attribute or the .asy is not found.
+        """
+        cache_key = f'{symbol_path}|attr:{attr}|{search_dirs or []}'
+        if cache_key in cls._attr_cache:
+            return cls._attr_cache[cache_key]
+
+        norm_path = (symbol_path or '').replace('\\', '/')
+        needle = f'SYMATTR {attr} '
+
+        def _extract(text: str) -> str:
+            for line in text.split('\n'):
+                line = line.strip()
+                if line.startswith(needle):
+                    return line[len(needle):].strip()
+            return ''
+
+        result = ''
+        # 1. provided dirs
+        if search_dirs and not result:
+            for d in search_dirs:
+                d = Path(d)
+                for cand in [d / (norm_path + '.asy'),
+                             d / (norm_path.split('/')[-1] + '.asy')]:
+                    if cand.is_file():
+                        for enc in ('utf-8', 'utf-16-le', 'latin-1'):
+                            try:
+                                result = _extract(cand.read_text(encoding=enc))
+                                break
+                            except (UnicodeDecodeError, UnicodeError):
+                                continue
+                    if result:
+                        break
+                if result:
+                    break
+        # 2. lib.zip
+        if not result:
+            zf = cls._get_zip()
+            if zf is not None:
+                base = norm_path.split('/')[-1].lower()
+                for zname in zf.namelist():
+                    if (zname.lower().endswith(f'/{base}.asy')
+                            and zname.startswith('lib/sym/')):
+                        try:
+                            raw = zf.read(zname)
+                        except KeyError:
+                            continue
+                        for enc in ('utf-8', 'utf-16-le', 'latin-1'):
+                            try:
+                                result = _extract(raw.decode(enc))
+                                break
+                            except (UnicodeDecodeError, UnicodeError):
+                                continue
+                        if result:
+                            break
+
+        cls._attr_cache[cache_key] = result
+        return result
+
     @staticmethod
     def _transform_point(x: int, y: int, rotation: str) -> Tuple[int, int]:
         """Transform a point by LTspice rotation/mirror.
@@ -727,9 +936,14 @@ class AscParser:
         if self.source_dir not in self.asy_search_dirs:
             self.asy_search_dirs.insert(0, self.source_dir)
         # LTSpice 17+ はUTF-16 LE、それ以前はUTF-8/ASCII
-        for encoding in ['utf-8', 'utf-16-le', 'ascii', 'latin-1']:
+        # Robust decode (UTF-16 LE/BE w/ or w/o BOM, UTF-8, cp1252) via the
+        # shared decoder -- single source of truth with the CLI reader. The
+        # old per-encoding loop dropped BOM-less UTF-16 .asc (UniversalOpAmp*)
+        # into a NUL-riddled string where 'Version'/'SHEET' never matched.
+        from .._shared import decode_asc_bytes
+        for encoding in ('robust',):
             try:
-                text = path.read_text(encoding=encoding)
+                text = decode_asc_bytes(path.read_bytes())
                 if text.startswith('\ufeff'):
                     text = text[1:]  # BOM除去
                 if 'Version' in text or 'SHEET' in text:
@@ -1004,7 +1218,12 @@ class NetlistExtractor:
             first = spice_line.lstrip()[:1].upper()
             sym_type = (sym.symbol_type or '').lower()
             defaults = _DEFAULT_SYM_BY_PREFIX.get(first, set())
-            if sym_type and sym_type not in defaults and first != 'X':
+            # Do NOT emit a hint before an A-element line: NetlistParser
+            # absorbs `A...` as a directive, so a preceding `* @sym=` would
+            # have no component to bind to and would leak onto the *next*
+            # real component (turning e.g. V1 into a bogus X§V1 ... sample).
+            if (sym_type and sym_type not in defaults
+                    and first not in ('X', 'A')):
                 # Avoid leaking proprietary names: only emit the bare symbol
                 # type string, no path or model.
                 lines.append(f'* @sym={sym.symbol_type}')
@@ -1142,6 +1361,17 @@ class NetlistExtractor:
                     union(fc, (w[0], w[1]))
                     break
 
+        # Jumper / net-tie symbols are zero-ohm shorts, not components:
+        # union their pins so the two nets collapse into one. This matches
+        # LTspice's own netlister, which merges the nodes and drops the
+        # jumper entirely (the component is suppressed in _symbol_to_spice).
+        for sym in self.asc.symbols:
+            if (sym.symbol_type or '').lower() in _SHORT_SYMBOLS:
+                terms = self.asc.get_component_terminals(sym)
+                if terms and len(terms) >= 2:
+                    for t in terms[1:]:
+                        union(terms[0], t)
+
         # Step 5: 端子座標をワイヤ端点にスナップ（近傍探索）
         # 3端子素子の端子オフセットは概算なので、余裕をもたせる
         SNAP_TOLERANCE = 64
@@ -1276,13 +1506,33 @@ class NetlistExtractor:
 
     def _symbol_to_spice(self, sym: AscSymbol) -> Optional[str]:
         """シンボルをSPICEコンポーネント行に変換"""
+        # Jumper / net-tie symbols are shorts, not components — their pins
+        # were already merged in _build_net_groups. Emit nothing (matches
+        # LTspice, which drops the jumper from the netlist).
+        if (sym.symbol_type or '').lower() in _SHORT_SYMBOLS:
+            return None
+
         terms = self.asc.get_component_terminals(sym)
         if terms is None or len(terms) == 0:
             return None
 
         prefix = SYMBOL_TO_SPICE.get(sym.symbol_type)
-        if prefix is None:
-            prefix = 'X'
+        # For symbols that are unmapped, or only generically mapped to X
+        # (subcircuit), consult the symbol's own .asy `SYMATTR Prefix` --
+        # the class LTspice itself uses. e.g. `xtal` declares `Prefix C`,
+        # so a crystal netlists as a capacitor (with Rser/Lser/Cpar), not a
+        # generic subcircuit. The .asy is authoritative; a usable letter
+        # overrides a hardcoded X.
+        if prefix is None or prefix == 'X':
+            asy_prefix = AsyParser.get_symbol_attr(
+                sym.symbol_path or sym.symbol_type or '', 'Prefix',
+                self.asc.asy_search_dirs or None,
+            ).upper()
+            if asy_prefix in _SPICE_CLASS_LETTERS:
+                prefix = asy_prefix
+            elif prefix is None:
+                prefix = 'X'
+            # else: keep the hardcoded 'X'
 
         name = sym.inst_name or f'{prefix}?'
         # Fix prefix mismatch: InstName's first letter disagrees with symbol's
@@ -1313,9 +1563,15 @@ class NetlistExtractor:
             name = new_name
         # Unknown vendor symbol → X-prefix (subcircuit invocation). Preserves
         # the symbol type as the model name so the round-trip can re-emit it.
+        # Exception: an InstName starting with 'A' is an LTspice special-
+        # function device (sample&hold, varistor, phase detector, ...). It
+        # must keep its 'A' prefix so the A-element path below emits a real
+        # `A<n> ...` line — the same form LTspice's own netlister produces.
+        # Prefixing it to `X§A1` mis-emits it as a generic subcircuit and
+        # silently inflates the component count.
         elif (prefix == 'X'
                 and name and name[0].isalpha()
-                and name[0].upper() != 'X'):
+                and name[0].upper() not in ('X', 'A')):
             new_name = f'X§{name}'
             self._name_remap[name] = new_name
             name = new_name
@@ -1439,7 +1695,7 @@ def asc_to_netlist(filepath: str,
                    asy_search_dirs: Optional[List[Path]] = None,
                    prefer_ltspice: Optional[bool] = None,
                    ltspice_exe: Optional[str] = None,
-                   ltspice_timeout: float = 30.0) -> str:
+                   ltspice_timeout: float = 20.0) -> str:
     """ASCファイルからネットリストを抽出。
 
     Two backends:
@@ -1527,14 +1783,6 @@ if __name__ == '__main__':
         print(f"Parsing: {filepath}")
         print(asc_to_netlist(filepath))
     else:
-        # テスト: 既存の変換例のASCをパース
-        test_asc = r"s:\LTSpice\01_GitHub\examples\00_converter\01_rc_lowpass\test_rc_lowpass.asc"
-        print(f"=== Parsing reference ASC ===")
-        print(f"File: {test_asc}")
-        netlist = asc_to_netlist(test_asc)
-        print(netlist)
-
-        print(f"\n=== Classification ===")
-        info = classify_asc(test_asc)
-        for k, v in info.items():
-            print(f"  {k}: {v}")
+        print("usage: python -m ltspice_converter.parser.asc_parser <file.asc>",
+              file=sys.stderr)
+        sys.exit(2)
