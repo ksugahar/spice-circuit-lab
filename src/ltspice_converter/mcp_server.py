@@ -1,12 +1,12 @@
-"""MCP server for ltspice-converter.
+"""MCP server for spice-circuit-lab.
 
-Exposes the four conversion functions plus a lint tool and a stats tool
-as MCP tools so AI agents (Claude Code, Cursor, etc.) can author,
-convert, and validate LTspice .asc, SPICE .cir, and schemdraw Python
-scripts on demand.
+Exposes conversion, linting, topology comparison, and small circuit-design
+seed helpers as MCP tools so AI agents (Claude Code, Cursor, etc.) can
+author, convert, validate, and bootstrap LTspice .asc / SPICE .cir /
+schemdraw circuits on demand.
 
-Run via the console script ``mcp-ltspice`` (installed by
-``pip install ltspice-converter[mcp]``).
+Run via the console script ``mcp-spice-circuit-lab``.  The legacy
+``mcp-ltspice`` command remains available.
 """
 from __future__ import annotations
 
@@ -17,9 +17,11 @@ from mcp.server.fastmcp import FastMCP
 
 from . import conversion
 from . import cli as _cli
+from .knowledge import buck_seed as _buck_seed
+from .knowledge import circuit_knowledge as _circuit_knowledge
 
 
-mcp = FastMCP("mcp-ltspice")
+mcp = FastMCP("mcp-spice-circuit-lab")
 
 
 @mcp.tool()
@@ -201,8 +203,54 @@ def compare_topology(netlist_a: str, netlist_b: str) -> dict:
     return {'equivalent': equal, **info}
 
 
+@mcp.tool()
+def circuit_knowledge(topic: str = "") -> dict:
+    """Return compact circuit-design rules by topic.
+
+    Args:
+        topic: Topic hint such as ``"buck"``, ``"switching"``,
+            ``"asc conversion"``, or ``"opamp"``.
+
+    Returns:
+        Dict with ``topic`` and a list of public design/checking rules.
+    """
+    return _circuit_knowledge(topic)
+
+
+@mcp.tool()
+def buck_seed(
+    vin_v: float,
+    vout_v: float,
+    iout_a: float,
+    fsw_hz: float = 100_000.0,
+    ripple_fraction: float = 0.25,
+) -> dict:
+    """Create a first-pass asynchronous buck-converter simulation seed.
+
+    Args:
+        vin_v: Input voltage.
+        vout_v: Target output voltage.
+        iout_a: Target output/load current.
+        fsw_hz: PWM switching frequency.
+        ripple_fraction: Target inductor peak-to-peak ripple fraction
+            relative to load current.
+
+    Returns:
+        Dict containing sizing calculations and an LTspice-ready SPICE
+        netlist.  This is an open-loop seed, not a finished supply.
+    """
+    seed = _buck_seed(
+        vin_v=vin_v,
+        vout_v=vout_v,
+        iout_a=iout_a,
+        fsw_hz=fsw_hz,
+        ripple_fraction=ripple_fraction,
+    )
+    return {"calculations": seed.to_dict(), "netlist": seed.to_netlist()}
+
+
 def main() -> int:
-    """Entry point for the ``mcp-ltspice`` console script."""
+    """Entry point for the ``mcp-spice-circuit-lab`` console script."""
     try:
         mcp.run()
     except KeyboardInterrupt:

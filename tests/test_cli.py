@@ -418,8 +418,7 @@ def test_info_text_counts_by_class():
 
 
 def test_mcp_tools_registered():
-    """The mcp_server module exposes all seven tools (4 conversion +
-    check/info + compare_topology).
+    """The mcp_server module exposes conversion, checking, and knowledge tools.
 
     Requires the optional ``[mcp]`` extra. CI runs with ``[test]`` only,
     so we skip if the ``mcp`` dependency isn't installed.
@@ -434,5 +433,6 @@ def test_mcp_tools_registered():
         "netlist_to_schemdraw", "schemdraw_to_netlist",
         "netlist_to_asc", "asc_to_netlist",
         "check_circuit", "info_circuit", "compare_topology",
+        "circuit_knowledge", "buck_seed",
     }
     assert expected <= names, f"missing MCP tools: {expected - names}"

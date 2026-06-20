@@ -228,7 +228,7 @@ Install with the `[mcp]` extra and add to your MCP client config:
 }
 ```
 
-Exposes seven tools:
+Exposes nine tools:
 
 | Tool | Purpose |
 |---|---|
@@ -239,6 +239,8 @@ Exposes seven tools:
 | `check_circuit(text, fmt, asy_search_dirs?)` | Lint: round-trip drift (count, GND-pin, **topology**) + static netlist checks. Returns `{ok, info, warnings}`. |
 | `info_circuit(text, fmt, asy_search_dirs?)` | Summary: component counts, symbol kinds, `.subckt` blocks. |
 | `compare_topology(netlist_a, netlist_b)` | Node-rename-invariant connectivity diff of two netlists. Returns `{equivalent, ...}`. |
+| `circuit_knowledge(topic)` | Compact public circuit-design and conversion rules by topic. |
+| `buck_seed(vin_v, vout_v, iout_a, fsw_hz?, ripple_fraction?)` | First-pass asynchronous buck sizing plus an LTspice-ready open-loop netlist. |
 
 Typical agent loop: generate netlist → `check_circuit(..., 'cir')` →
 if `warnings` non-empty, fix and re-check → only ship when clean.
