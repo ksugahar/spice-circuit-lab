@@ -402,6 +402,97 @@ def test_check_text_voltage_controlled_switch_model_and_nodes():
     assert not any("sw_main" in w.lower() for w in warn), warn
 
 
+def test_check_text_controlled_source_counts_control_pins():
+    from ltspice_converter.cli import check_text
+    netlist = (
+        "* VCVS control pins are node pins\n"
+        "VIN in 0 AC 1\n"
+        "EGAIN out 0 in 0 10\n"
+        "RLOAD out 0 10k\n"
+        ".end\n"
+    )
+    _info, warn = check_text(netlist, "cir")
+    assert not any("floating node" in w.lower() and "in" in w.lower() for w in warn), warn
+
+
+def test_check_text_x_inline_params_use_last_bare_token_as_subckt():
+    from ltspice_converter.cli import check_text
+    netlist = (
+        "* X inline params\n"
+        "V1 in 0 DC 5\n"
+        "X1 in out gain_block Avol=10\n"
+        "RLOAD out 0 10k\n"
+        ".subckt gain_block a b params: Avol=1\n"
+        "E1 b 0 a 0 {Avol}\n"
+        ".ends gain_block\n"
+        ".end\n"
+    )
+    _info, warn = check_text(netlist, "cir")
+    joined = "\n".join(warn).lower()
+    assert "avol=10" not in joined, warn
+    assert ".subckt declared but never used" not in joined, warn
+
+
+def test_check_text_behavioral_source_v_reference_not_floating():
+    from ltspice_converter.cli import check_text
+    netlist = (
+        "* Behavioral source references input node\n"
+        "V1 in 0 SIN(0 1 1k)\n"
+        "B1 out 0 V=limit(V(in)*2,-1.5,1.5)\n"
+        "RLOAD out 0 1k\n"
+        ".end\n"
+    )
+    _info, warn = check_text(netlist, "cir")
+    assert not any("floating node" in w.lower() and "in" in w.lower() for w in warn), warn
+
+
+def test_schemdraw_generated_script_preserves_raw_spice_lines():
+    from ltspice_converter import netlist_to_schemdraw, schemdraw_to_netlist
+    from ltspice_converter.topology import topology_equivalent
+
+    netlist = (
+        "* Buck switch raw-line preservation\n"
+        "VIN vin 0 DC 24\n"
+        "VGATE gate 0 PULSE(0 10 0 20n 20n 2.3u 10u)\n"
+        "SMAIN vin sw gate 0 SW_MAIN\n"
+        "L1 sw out 120u\n"
+        "RLOAD out 0 5\n"
+        ".model SW_MAIN SW(Ron=50m Roff=10Meg Vt=4 Vh=0.5)\n"
+        ".end\n"
+    )
+    script = netlist_to_schemdraw(netlist, "buck_raw_preserve")
+    recovered = schemdraw_to_netlist(script, "buck_raw_preserve")
+    equivalent, info = topology_equivalent(netlist, recovered)
+    assert equivalent, info
+    assert "SMAIN vin sw gate 0 SW_MAIN" in recovered
+
+
+def test_asc_roundtrip_preserves_unknown_subckt_raw_line():
+    from ltspice_converter import asc_to_netlist, netlist_to_asc
+    from ltspice_converter.topology import topology_equivalent
+
+    netlist = (
+        "* Unknown .asy X-line should stay simulation-correct\n"
+        "V1 in 0 DC 5\n"
+        "X1 in out gain_block Avol=10\n"
+        "RLOAD out 0 10k\n"
+        ".subckt gain_block a b params: Avol=1\n"
+        "E1 b 0 a 0 {Avol}\n"
+        ".ends gain_block\n"
+        ".op\n"
+        ".end\n"
+    )
+    asc = netlist_to_asc(netlist)
+    assert "TEXT" in asc
+    assert "!X1 in out gain_block Avol=10" in asc
+    assert "SYMBOL gain_block" not in asc
+
+    recovered = asc_to_netlist(asc, use_ltspice=False)
+    equivalent, info = topology_equivalent(netlist, recovered)
+    assert equivalent, info
+    assert "X1 in out gain_block Avol=10" in recovered
+
+
 def test_info_text_counts_by_class():
     """info_text() returns per-class component counts for a netlist."""
     from ltspice_converter.cli import info_text

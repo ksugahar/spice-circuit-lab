@@ -316,6 +316,14 @@ class CirToSchemdraw:
     def _emit_footer(self, name: str):
         safe_name = _sanitize_label(name)
 
+        # Preserve source component lines for lossless reverse conversion
+        # when this script was generated from a SPICE netlist.  The visible
+        # drawing remains best-effort, but schemdraw->cir can recover exact
+        # multi-pin / behavioral / vendor component lines from this metadata.
+        for comp in self.parser.components:
+            safe_line = _sanitize_label(comp.raw_line)
+            self.lines.append(f"    d.add(elm.Annotate().at((0, -4)).label('SPICELINE:{safe_line}').color('white'))")
+
         # ディレクティブを不可視Labelとして埋め込む（schemdraw→.cir で復元可能）
         # 同時にコメントとしても残す（可読性のため）
         for directive in self.parser.directives:

@@ -353,6 +353,24 @@ def _component_lines(lines: List[str]) -> List[Tuple[str, List[str]]]:
     return out
 
 
+def _split_x_nodes_and_subckt(rest: List[str]) -> Tuple[List[str], str]:
+    """Return (nodes, subckt_name) for an X instance with optional params."""
+    if not rest:
+        return [], ''
+    pidx = next((i for i, token in enumerate(rest) if '=' in token), len(rest))
+    pre = rest[:pidx]
+    if len(pre) >= 2:
+        return pre[:-1], pre[-1]
+    if len(rest) >= 2:
+        return rest[:-1], rest[-1]
+    return rest, ''
+
+
+def _behavioral_referenced_nodes(rest: List[str]) -> List[str]:
+    text = ' '.join(rest[2:]) if len(rest) > 2 else ' '.join(rest)
+    return re.findall(r'(?i)\bV\(\s*([A-Za-z_][A-Za-z0-9_.$]*)\s*(?:[,)]|$)', text)
+
+
 def static_checks(netlist: str) -> List[str]:
     """Return a list of warning strings from static netlist analysis.
 
@@ -395,8 +413,8 @@ def static_checks(netlist: str) -> List[str]:
         elif cls == 'J':
             ks = rest[:3] if len(rest) >= 3 else rest
         elif cls == 'X':
-            # subckt: last token is model name, rest are nodes
-            ks = rest[:-1] if len(rest) >= 2 else rest
+            # subckt: last bare token before key=value params is model name
+            ks, _subckt = _split_x_nodes_and_subckt(rest)
         elif cls == 'U':
             # opamp: 3-pin (no model) or 5-pin (last token is model)
             if len(rest) == 3:
@@ -412,6 +430,13 @@ def static_checks(netlist: str) -> List[str]:
             # node positions so the control node is not falsely reported as
             # floating when it is driven by a voltage source.
             ks = rest[:4] if len(rest) >= 4 else rest[:2]
+        elif cls in 'EGT':
+            # E/G: out+ out- ctrl+ ctrl- value.  T: A+ A- B+ B- params.
+            ks = rest[:4] if len(rest) >= 4 else rest[:2]
+        elif cls == 'B':
+            # Behavioral source has two electrical pins; V(node) references
+            # in the expression are also intentional signal dependencies.
+            ks = rest[:2] + _behavioral_referenced_nodes(rest)
         else:
             ks = rest[:2]  # conservative
         for tok in ks:
@@ -465,7 +490,9 @@ def static_checks(netlist: str) -> List[str]:
         if not rest:
             continue
         if cls == 'X':
-            referenced_subckts.add(rest[-1])
+            _nodes, subckt_name = _split_x_nodes_and_subckt(rest)
+            if subckt_name:
+                referenced_subckts.add(subckt_name)
         elif cls in 'DQMJS':
             referenced_models.add(rest[-1])
 

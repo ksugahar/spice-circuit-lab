@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "spice-circuit-lab"
 version = "0.4.0"
-description = "Circuit-aware SPICE/LTspice conversion, validation, and first-pass design helpers"
+description = "Circuit-aware SPICE/LTspice lab bench for ASC/CIR/schemdraw conversion, topology checks, and MCP agent workflows"
 readme = "README.md"
 license = "MIT"
 authors = [

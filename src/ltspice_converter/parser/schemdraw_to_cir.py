@@ -193,6 +193,10 @@ class SchemdrawToCir:
         self._comp_counters: Dict[str, int] = defaultdict(int)
         # SPICE行リスト
         self.spice_lines: List[str] = []
+        # Original component lines embedded by cir_to_schemdraw.  When
+        # present, these are more faithful than geometry-derived netlists
+        # for multi-pin / behavioral components.
+        self.raw_spice_lines: List[str] = []
         # SPICEディレクティブ
         self.directives: List[str] = []
         # タイトル
@@ -205,6 +209,7 @@ class SchemdrawToCir:
         self._next_node = 1
         self._comp_counters = defaultdict(int)
         self.spice_lines = []
+        self.raw_spice_lines = []
         self.directives = []
         self.title = ''
 
@@ -484,7 +489,9 @@ class SchemdrawToCir:
                 if not text:
                     continue
                 first = text[0]
-                if first == '.' or first.upper() in ('K', 'A'):
+                if text.startswith('SPICELINE:'):
+                    self.raw_spice_lines.append(text[len('SPICELINE:'):])
+                elif first == '.' or first.upper() in ('K', 'A'):
                     self.directives.append(text)
                 elif text.startswith('NODE:'):
                     node_names_found.append(text[5:])
@@ -567,7 +574,7 @@ class SchemdrawToCir:
         """SPICEネットリスト文字列を生成"""
         lines = []
         lines.append(f"* {self.title}")
-        lines.extend(self.spice_lines)
+        lines.extend(self.raw_spice_lines if self.raw_spice_lines else self.spice_lines)
         for d in self.directives:
             # NetlistParser packs multi-line directives (e.g. .subckt ... .ends
             # bodies) into a single SpiceDirective.text with embedded real

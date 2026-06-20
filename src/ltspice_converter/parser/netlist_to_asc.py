@@ -1241,6 +1241,11 @@ class AscGenerator:
 
         placed = layouter.placed_components
         node_positions = layouter.node_positions
+        self._raw_directive_subckt_ids = {
+            id(pc.component)
+            for pc in placed
+            if self._should_emit_subckt_as_raw_directive(pc)
+        }
 
         # シートサイズの自動計算
         if sheet_width == 0 or sheet_height == 0:
@@ -1265,6 +1270,8 @@ class AscGenerator:
         node_terminal_map: Dict[str, List[Tuple[int, int]]] = {}
         for pc in placed:
             comp = pc.component
+            if self._is_raw_directive_subckt(comp):
+                continue
             if (comp.comp_type == ComponentType.SUBCIRCUIT
                     and len(comp.extra_nodes) > 0):
                 continue
@@ -1367,6 +1374,46 @@ class AscGenerator:
 
         return val, ''
 
+    @staticmethod
+    def _subckt_pins(comp: Component) -> List[str]:
+        """Return positional pins for an X-subcircuit invocation."""
+        return [
+            p for p in [comp.node_pos, comp.node_neg] + list(comp.extra_nodes)
+            if p
+        ]
+
+    def _subckt_terminal_offsets(self, comp: Component, rotation: str):
+        """Look up .asy terminal offsets for a subcircuit symbol, if present."""
+        if comp.comp_type != ComponentType.SUBCIRCUIT:
+            return None
+        sym_name = comp.value or ''
+        pins = self._subckt_pins(comp)
+        if not sym_name or not pins:
+            return None
+        from .asc_parser import AsyParser as _AsyParser  # noqa: E402
+        return _AsyParser.get_terminal_offsets(
+            sym_name,
+            rotation,
+            search_dirs=self.asy_search_dirs or None,
+        )
+
+    def _should_emit_subckt_as_raw_directive(self, pc: PlacedComponent) -> bool:
+        """Prefer lossless raw X-lines when a matching .asy is unavailable.
+
+        A generic unknown SYMBOL plus estimated pins can corrupt the X-line by
+        inventing extra nodes. When we do not have the symbol definition, the
+        simulation-correct representation is an LTspice SPICE directive.
+        """
+        comp = pc.component
+        if comp.comp_type != ComponentType.SUBCIRCUIT or not comp.raw_line:
+            return False
+        pins = self._subckt_pins(comp)
+        offsets = self._subckt_terminal_offsets(comp, pc.rotation)
+        return not offsets or len(offsets) < len(pins)
+
+    def _is_raw_directive_subckt(self, comp: Component) -> bool:
+        return id(comp) in getattr(self, '_raw_directive_subckt_ids', set())
+
     # Opampモデル名 → LTSpiceシンボルパス
     OPAMP_SYMBOL_MAP = {
         'opamp':            'Opamps\\\\opamp',
@@ -1395,6 +1442,9 @@ class AscGenerator:
         # "this was a vendor symbol whose InstName did not start with X";
         # strip it so the InstName reads correctly in the new .asc.
         if comp.comp_type == ComponentType.SUBCIRCUIT:
+            if self._is_raw_directive_subckt(comp):
+                self.lines.append(f'TEXT {pc.x} {pc.y} Left 2 !{comp.raw_line}')
+                return
             inst_name = comp.name
             if inst_name.startswith('X§'):
                 inst_name = inst_name[2:]
@@ -1409,22 +1459,13 @@ class AscGenerator:
             # AsyParser.get_terminal_offsets(<sym>, <rotation>). asc_parser
             # uses the same lookup on re-extraction, so the pin-to-node
             # mapping survives intact — provided the .asy file is on the
-            # LTspice library search path. Without a matching .asy we
-            # fall back to a compact grid (count-preserving but lossy on
-            # topology).
+            # LTspice library search path. Without a matching .asy, generate()
+            # normally emits the original X-line as a raw SPICE directive.
             #
             # Imported here to avoid a top-level circular import; this
             # path is only hit for SUBCIRCUITs.
-            from .asc_parser import AsyParser as _AsyParser  # noqa: E402
-
-            all_pins = [comp.node_pos, comp.node_neg] + list(comp.extra_nodes)
-            all_pins = [p for p in all_pins if p]  # drop blanks
-            offsets = None
-            if sym_name and sym_name != 'res' and all_pins:
-                offsets = _AsyParser.get_terminal_offsets(
-                    sym_name, pc.rotation,
-                    search_dirs=self.asy_search_dirs or None,
-                )
+            all_pins = self._subckt_pins(comp)
+            offsets = self._subckt_terminal_offsets(comp, pc.rotation)
 
             if offsets and len(offsets) >= len(all_pins):
                 # .asy lookup succeeded — place each FLAG at the canonical
@@ -1441,17 +1482,8 @@ class AscGenerator:
                     self.lines.append(f'WIRE {fx} {fy} {fx+8} {fy}')
                     self.lines.append(f'FLAG {fx} {fy} {flag_name}')
             elif all_pins:
-                # .asy not found — fall back to a single-column FLAG layout
-                # where pin i sits at offset (DX, DY*i) from the symbol
-                # centre.  Manhattan distance is then DX + DY*i, strictly
-                # monotonic in i, so when asc_parser._estimate_terminals
-                # reads pins back (sorted by Manhattan distance ascending)
-                # the index order is preserved -- the round-trip is
-                # topology-correct even without a matching .asy file.
-                # Replaces the previous 4-column grid fallback whose
-                # equal-distance neighbours randomised pin order on
-                # re-extraction (G2 fix, see GND-pin drift bench v0.3.11
-                # -> v0.3.12 in BENCHMARKS.md).
+                # Defensive fallback for direct _write_symbol callers that did
+                # not run generate()'s raw-directive classifier first.
                 DX = 32
                 DY = 16
                 seen_flags: Set[Tuple[int, int, str]] = set()
@@ -1559,6 +1591,8 @@ class AscGenerator:
         node_pins: Dict[str, List[Tuple[int, int]]] = {}
         for pc in placed:
             comp = pc.component
+            if self._is_raw_directive_subckt(comp):
+                continue
             if (comp.comp_type == ComponentType.SUBCIRCUIT
                     and len(comp.extra_nodes) > 0):
                 continue

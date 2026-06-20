@@ -4,37 +4,43 @@
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://github.com/ksugahar/spice-circuit-lab)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-`spice-circuit-lab` is the circuit-aware successor to
-`ltspice-converter`.  The old package and command names remain available for
-backward compatibility, but the project is now scoped as a SPICE/LTspice
-conversion, validation, and first-pass circuit-design toolkit.
+`spice-circuit-lab` is a circuit-aware lab bench for SPICE/LTspice work:
+it converts `.asc`, `.cir`, and schemdraw Python, checks whether round-trips
+preserve topology, and exposes MCP tools so AI agents can author, inspect,
+and refine circuits without losing the electrical intent.
 
-What's new in [v0.4.0](CHANGELOG.md): when **LTspice is installed it is
-now the default `.asc → netlist` backend** (its own `-netlist` is the
-ground truth — pure-Python remains the fallback and the deterministic
-opt-out via `--no-ltspice`). Auditing pure-Python against LTspice as an
-oracle fixed four real extraction bugs (jumper net-ties, inline
-subcircuit parameters mis-read as pins, special-function `A` devices,
-and reading a symbol's SPICE class from its `.asy` `Prefix`) plus a
-BOM-less-UTF-16 reader bug, lifting pure-Python's match-to-LTspice on
-the Examples corpus from 55 % to 71 % strict (88 % correct-wiring). v0.3.14 added a **node-rename-invariant
-topology check**.  Count and GND-pin metrics are saturated at ~100 %,
-but they are blind to *silent rewiring* — a multi-pin vendor symbol
-without its `.asy` round-trips with a scrambled pin list and the count
-check still says "clean".  The new check catches it (`check_circuit`
-gains a `topology drift` warning; new MCP tool `compare_topology`).
-Measured topology-match: textbook 100 %, Applications 96.9 %, Examples
-92.0 %, unseen GitHub repos 79.3 % — see
-[docs/BENCHMARKS.md](docs/BENCHMARKS.md).  Earlier: v0.3.13 added
-transmission-line (`T`) support; v0.3.10–0.3.12 brought the
-`.asc <-> .cir` arm and GND-pin topology to ~100 / 99 %.
+It is the successor to `ltspice-converter`.  The old package and command
+names remain available for backward compatibility, but the project is now
+scoped as a SPICE/LTspice conversion, validation, and first-pass
+circuit-design toolkit.
 
-Convert between three circuit representations, then add topology checks and
-small circuit-knowledge helpers on top:
+Core capabilities:
+
+- Convert between LTspice `.asc`, SPICE `.cir`, and runnable schemdraw scripts.
+- Prefer LTspice's own `-netlist` backend when available, with deterministic
+  pure-Python extraction when requested.
+- Detect topology drift, not just component-count drift, so silent rewiring
+  does not pass as a clean conversion.
+- Preserve difficult SPICE forms such as controlled sources, behavioral
+  expressions, switch models, and inline subcircuit parameters.
+- Provide public circuit-knowledge helpers and MCP tools for agentic circuit
+  design workflows.
+
+Conversion graph:
 
 ```
    LTspice .asc  <---->  SPICE .cir  <---->  schemdraw Python script
 ```
+
+What's new in [v0.4.0](CHANGELOG.md): when **LTspice is installed it is
+now the default `.asc -> netlist` backend** (its own `-netlist` is the
+ground truth; pure-Python remains the deterministic opt-out via
+`--no-ltspice`). Auditing pure-Python against LTspice as an oracle fixed
+real extraction bugs around jumper net-ties, inline subcircuit parameters,
+special-function `A` devices, `.asy` `Prefix` classes, and BOM-less UTF-16
+input. v0.3.14 added a **node-rename-invariant topology check** that catches
+silent rewiring even when component counts still match. See
+[docs/BENCHMARKS.md](docs/BENCHMARKS.md) for corpus results.
 
 Works without LTspice (pure-Python), but **uses LTspice's own
 `-netlist` automatically when LTspice.exe is installed** — that is the
