@@ -1,5 +1,7 @@
-"""ltspice-converter — convert LTspice .asc and SPICE .cir files
-to/from schemdraw Python scripts.
+"""spice-circuit-lab — circuit-aware SPICE/LTspice conversion tools.
+
+The project was originally published as ``ltspice-converter``.  The old
+package import remains available for compatibility.
 
 Public API
 ----------
@@ -9,6 +11,8 @@ Public API
 - asc_to_netlist(asc_text, use_ltspice=None) -> str   # None = auto (LTspice if installed)
 - topology_signature(netlist) -> str            (node-rename-invariant)
 - topology_equivalent(netlist_a, netlist_b) -> (bool, info)
+- circuit_knowledge(topic) -> dict
+- buck_seed(vin_v, vout_v, iout_a, fsw_hz=...) -> BuckSeed
 
 CLI / MCP server
 ----------------
@@ -23,6 +27,7 @@ from .conversion import (
     asc_to_netlist,
 )
 from .topology import topology_signature, topology_equivalent
+from .knowledge import circuit_knowledge, buck_seed, BuckSeed
 
 __all__ = [
     "netlist_to_schemdraw",
@@ -31,6 +36,9 @@ __all__ = [
     "asc_to_netlist",
     "topology_signature",
     "topology_equivalent",
+    "circuit_knowledge",
+    "buck_seed",
+    "BuckSeed",
 ]
 
 __version__ = "0.4.0"

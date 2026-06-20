@@ -41,7 +41,7 @@ def run_cli(*args: str, check: bool = False) -> subprocess.CompletedProcess:
 def test_version():
     r = run_cli("--version")
     assert r.returncode == 0
-    assert r.stdout.strip().startswith("ltspice-convert ")
+    assert r.stdout.strip().startswith("spice-circuit-lab ")
 
 
 def test_help():
@@ -381,6 +381,25 @@ def test_check_text_flags_duplicate_instance():
     )
     _info, warn = check_text(netlist, "cir")
     assert any("duplicate" in w.lower() for w in warn), warn
+
+
+def test_check_text_voltage_controlled_switch_model_and_nodes():
+    """Voltage-controlled S switches use four node pins plus a .model."""
+    from ltspice_converter.cli import check_text
+    netlist = (
+        "* PWM buck switch seed\n"
+        "VIN vin 0 DC 24\n"
+        "VGATE gate 0 PULSE(0 10 0 20n 20n 2.3u 10u)\n"
+        "SMAIN vin sw gate 0 SW_MAIN\n"
+        "L1 sw out 120u\n"
+        "RLOAD out 0 5\n"
+        ".model SW_MAIN SW(Ron=50m Roff=10Meg Vt=4 Vh=0.5)\n"
+        ".tran 0 1m\n"
+        ".end\n"
+    )
+    _info, warn = check_text(netlist, "cir")
+    assert not any("floating node" in w.lower() for w in warn), warn
+    assert not any("sw_main" in w.lower() for w in warn), warn
 
 
 def test_info_text_counts_by_class():

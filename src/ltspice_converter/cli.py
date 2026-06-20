@@ -1,33 +1,34 @@
-"""Command-line interface for ltspice-converter.
+"""Command-line interface for spice-circuit-lab.
 
 Three modes -- convert, check, info -- wrapped around the same Python API
-the MCP server uses. Wired up as the console script ``ltspice-convert``
-in ``pyproject.toml``.
+the MCP server uses. Wired up as the console scripts
+``spice-circuit-lab`` and legacy ``ltspice-convert`` in
+``pyproject.toml``.
 
 Examples
 --------
 Convert a single file (auto target by extension):
 
-    ltspice-convert input.asc -o output.cir
-    ltspice-convert input.cir -o output.py
+    spice-circuit-lab input.asc -o output.cir
+    spice-circuit-lab input.cir -o output.py
 
 Convert multiple files (output is a directory, target chosen by --to):
 
-    ltspice-convert *.asc -o build/ --to cir
+    spice-circuit-lab *.asc -o build/ --to cir
 
 Lint a circuit (round-trip check + .asy availability):
 
-    ltspice-convert --check dimmer.asc
-    ltspice-convert --check --strict *.asc      # exit 1 on any warning
+    spice-circuit-lab --check dimmer.asc
+    spice-circuit-lab --check --strict *.asc    # exit 1 on any warning
 
 Show a summary of a circuit:
 
-    ltspice-convert --info input.asc
-    ltspice-convert --info --json input.asc     # machine-readable
+    spice-circuit-lab --info input.asc
+    spice-circuit-lab --info --json input.asc   # machine-readable
 
 Add a third-party symbol library to the .asy search path:
 
-    ltspice-convert --asy-dir /path/to/MyLib/sym input.asc -o output.cir
+    spice-circuit-lab --asy-dir /path/to/MyLib/sym input.asc -o output.cir
 
 The ``--asy-dir`` flag and the ``LTSPICE_ASY_SEARCH_PATH`` env var are
 equivalent; CLI flags take precedence.
@@ -404,6 +405,13 @@ def static_checks(netlist: str) -> List[str]:
                 ks = rest[:-1]
             else:
                 ks = rest
+        elif cls == 'S':
+            # Voltage-controlled switch:
+            #   Sname n+ n- ctrl+ ctrl- model
+            # The model token is not a node. Treat all four terminals as
+            # node positions so the control node is not falsely reported as
+            # floating when it is driven by a voltage source.
+            ks = rest[:4] if len(rest) >= 4 else rest[:2]
         else:
             ks = rest[:2]  # conservative
         for tok in ks:
@@ -458,7 +466,7 @@ def static_checks(netlist: str) -> List[str]:
             continue
         if cls == 'X':
             referenced_subckts.add(rest[-1])
-        elif cls in 'DQMJ':
+        elif cls in 'DQMJS':
             referenced_models.add(rest[-1])
 
     orphan_models = defined_models - referenced_models
@@ -888,16 +896,16 @@ def cmd_info(args) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog='ltspice-convert',
+        prog='spice-circuit-lab',
         description='Convert between LTspice .asc, SPICE .cir, '
                     'and schemdraw Python scripts.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Examples:
-  ltspice-convert input.asc -o output.cir
-  ltspice-convert *.asc -o build/ --to cir
-  ltspice-convert --check input.asc
-  ltspice-convert --info input.asc --json
+  spice-circuit-lab input.asc -o output.cir
+  spice-circuit-lab *.asc -o build/ --to cir
+  spice-circuit-lab --check input.asc
+  spice-circuit-lab --info input.asc --json
 """,
     )
     p.add_argument(

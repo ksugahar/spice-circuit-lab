@@ -1,8 +1,13 @@
-# ltspice-converter
+# spice-circuit-lab
 
-[![CI](https://github.com/ksugahar/ltspice-converter/actions/workflows/test.yml/badge.svg)](https://github.com/ksugahar/ltspice-converter/actions/workflows/test.yml)
-[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://github.com/ksugahar/ltspice-converter)
+[![CI](https://github.com/ksugahar/spice-circuit-lab/actions/workflows/test.yml/badge.svg)](https://github.com/ksugahar/spice-circuit-lab/actions/workflows/test.yml)
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://github.com/ksugahar/spice-circuit-lab)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+`spice-circuit-lab` is the circuit-aware successor to
+`ltspice-converter`.  The old package and command names remain available for
+backward compatibility, but the project is now scoped as a SPICE/LTspice
+conversion, validation, and first-pass circuit-design toolkit.
 
 What's new in [v0.4.0](CHANGELOG.md): when **LTspice is installed it is
 now the default `.asc → netlist` backend** (its own `-netlist` is the
@@ -24,7 +29,8 @@ Measured topology-match: textbook 100 %, Applications 96.9 %, Examples
 transmission-line (`T`) support; v0.3.10–0.3.12 brought the
 `.asc <-> .cir` arm and GND-pin topology to ~100 / 99 %.
 
-Convert between three circuit representations:
+Convert between three circuit representations, then add topology checks and
+small circuit-knowledge helpers on top:
 
 ```
    LTspice .asc  <---->  SPICE .cir  <---->  schemdraw Python script
@@ -45,33 +51,33 @@ The package is distributed from GitHub (no PyPI release). Install
 directly with pip:
 
 ```bash
-pip install git+https://github.com/ksugahar/ltspice-converter
+pip install git+https://github.com/ksugahar/spice-circuit-lab
 ```
 
 For MCP server support (Claude Code, Cursor, etc.):
 
 ```bash
-pip install "ltspice-converter[mcp] @ git+https://github.com/ksugahar/ltspice-converter"
+pip install "spice-circuit-lab[mcp] @ git+https://github.com/ksugahar/spice-circuit-lab"
 ```
 
 Pinning a specific version:
 
 ```bash
-pip install git+https://github.com/ksugahar/ltspice-converter@v0.4.0
+pip install git+https://github.com/ksugahar/spice-circuit-lab@v0.4.0
 ```
 
 For development:
 
 ```bash
-git clone https://github.com/ksugahar/ltspice-converter
-cd ltspice-converter
+git clone https://github.com/ksugahar/spice-circuit-lab
+cd spice-circuit-lab
 pip install -e .[test,mcp]
 ```
 
 ## Python API
 
 ```python
-import ltspice_converter as lc
+import spice_circuit_lab as scl
 
 netlist = """* RC Lowpass Filter
 V1 in 0 AC 1
@@ -81,44 +87,68 @@ C1 in1 0 1u
 .end"""
 
 # SPICE netlist -> runnable schemdraw script
-script = lc.netlist_to_schemdraw(netlist, name="rc")
+script = scl.netlist_to_schemdraw(netlist, name="rc")
 
 # schemdraw script -> SPICE netlist
-recovered = lc.schemdraw_to_netlist(script, title="rc")
+recovered = scl.schemdraw_to_netlist(script, title="rc")
 
 # SPICE netlist -> LTspice .asc text
-asc_text = lc.netlist_to_asc(netlist)
+asc_text = scl.netlist_to_asc(netlist)
 
 # LTspice .asc text -> SPICE netlist. use_ltspice=None (default) auto-uses
 # LTspice.exe when installed (canonical, ground-truth topology) and falls
 # back to pure-Python otherwise. Force with use_ltspice=True / False.
-recovered_netlist = lc.asc_to_netlist(asc_text)
-deterministic   = lc.asc_to_netlist(asc_text, use_ltspice=False)
+recovered_netlist = scl.asc_to_netlist(asc_text)
+deterministic   = scl.asc_to_netlist(asc_text, use_ltspice=False)
+```
+
+Legacy imports still work:
+
+```python
+import ltspice_converter as lc
+```
+
+## Circuit-knowledge helpers
+
+The package includes small public design helpers for simulation seeds.  These
+are engineering rules of thumb, not sign-off designs.
+
+```python
+import spice_circuit_lab as scl
+
+seed = scl.buck_seed(24, 5, 1, fsw_hz=100_000)
+print(seed.to_dict())
+print(seed.to_netlist())
+
+rules = scl.circuit_knowledge("buck converter")
+for rule in rules["rules"]:
+    print("-", rule)
 ```
 
 ## Command-line tool
 
-Installing the package wires up the `ltspice-convert` console script.
+Installing the package wires up the `spice-circuit-lab` console script.
+The old `ltspice-convert` command remains available.
 No Python knowledge needed.
 
 ### Conversion
 
 ```bash
 # Single file (target inferred from -o or the "opposite" of input)
-ltspice-convert input.asc -o output.cir
-ltspice-convert input.cir -o output.asc
-ltspice-convert input.cir -o output.py        # netlist -> schemdraw script
+spice-circuit-lab input.asc -o output.cir
+spice-circuit-lab input.cir -o output.asc
+spice-circuit-lab input.cir -o output.py        # netlist -> schemdraw script
 
 # Auto output path (same dir, sensible default extension)
-ltspice-convert input.asc                     # writes input.cir alongside
-ltspice-convert input.asc --to py             # writes input.py alongside
+spice-circuit-lab input.asc                     # writes input.cir alongside
+spice-circuit-lab input.asc --to py             # writes input.py alongside
 
 # Batch (output is a directory; --to picks target format)
-ltspice-convert *.asc -o build/ --to cir
+spice-circuit-lab *.asc -o build/ --to cir
 
 # Backend for .asc -> netlist: default auto-uses LTspice when installed.
-ltspice-convert input.asc -o output.cir --no-ltspice   # force pure-Python
-ltspice-convert input.asc -o output.cir --use-ltspice  # force LTspice
+spice-circuit-lab input.asc -o output.cir --no-ltspice   # force pure-Python
+spice-circuit-lab input.asc -o output.cir --use-ltspice  # force LTspice
 ```
 
 ### Round-trip check (lint mode)
@@ -128,10 +158,10 @@ reports drift / `.asy` resolution gaps. Use `--strict` to make any
 warning exit non-zero -- handy in CI.
 
 ```bash
-ltspice-convert --check input.asc
+spice-circuit-lab --check input.asc
 # -> PASS / PASS (with warnings) / FAIL  on stdout, with [ok]/[warn] details
 
-ltspice-convert --check --strict *.asc        # exit 1 if any warning
+spice-circuit-lab --check --strict *.asc        # exit 1 if any warning
 ```
 
 The round-trip arm reports three drift signals: **component count**,
@@ -156,8 +186,8 @@ Static netlist checks `--check` runs (in addition to round-trip):
 ### Info / stats
 
 ```bash
-ltspice-convert --info input.asc              # human-readable
-ltspice-convert --info --json input.asc       # machine-readable JSON
+spice-circuit-lab --info input.asc              # human-readable
+spice-circuit-lab --info --json input.asc       # machine-readable JSON
 ```
 
 ### Third-party `.asy` libraries
@@ -166,8 +196,8 @@ ltspice-convert --info --json input.asc       # machine-readable JSON
 `LTSPICE_ASY_SEARCH_PATH` env var:
 
 ```bash
-ltspice-convert --asy-dir /path/to/MyLib/sym input.asc -o out.cir
-ltspice-convert --asy-dir A --asy-dir B input.asc -o out.cir
+spice-circuit-lab --asy-dir /path/to/MyLib/sym input.asc -o out.cir
+spice-circuit-lab --asy-dir A --asy-dir B input.asc -o out.cir
 ```
 
 CLI flags take priority over the env var; both can be combined.
@@ -192,7 +222,7 @@ Install with the `[mcp]` extra and add to your MCP client config:
 {
   "mcpServers": {
     "ltspice": {
-      "command": "mcp-ltspice"
+      "command": "mcp-spice-circuit-lab"
     }
   }
 }
@@ -247,7 +277,7 @@ looks like this:
 1. **Start in LTspice**: open or draw a schematic, save as `foo.asc`.
 
 2. **Hand to an AI agent**.  In Claude Code or Cursor with
-   `mcp-ltspice` configured, ask the agent to modify the circuit.
+   `mcp-spice-circuit-lab` configured (`mcp-ltspice` also works), ask the agent to modify the circuit.
    The agent calls:
 
    ```
@@ -283,17 +313,17 @@ looks like this:
 
 ```bash
 # 1-2. Extract netlist from LTspice schematic
-ltspice-convert foo.asc -o foo.cir
+spice-circuit-lab foo.asc -o foo.cir
 
 # 3. Edit foo.cir by hand (or with any tool), then lint
-ltspice-convert --check --strict foo.cir
+spice-circuit-lab --check --strict foo.cir
 
 # 4-5. Regenerate the schematic for LTspice
-ltspice-convert foo.cir -o foo_v2.asc
+spice-circuit-lab foo.cir -o foo_v2.asc
 
 # Or render to PDF/SVG via schemdraw — no LTspice install needed,
 # useful for papers, slides, and web pages:
-ltspice-convert foo.cir -o foo.py && python foo.py
+spice-circuit-lab foo.cir -o foo.py && python foo.py
 ```
 
 ### Why this matters
@@ -360,16 +390,16 @@ D2 T2 T1 BD
 .end
 ```
 
-round-trips through `ltspice-convert` cleanly:
+round-trips through `spice-circuit-lab` cleanly:
 
 ```bash
-ltspice-convert myckt.cir -o myckt.asc      # write LTspice schematic
-ltspice-convert myckt.asc -o back.cir       # extract back
+spice-circuit-lab myckt.cir -o myckt.asc      # write LTspice schematic
+spice-circuit-lab myckt.asc -o back.cir       # extract back
 diff myckt.cir back.cir                     # node names may rename;
                                             # the .subckt block is byte-equal
 ```
 
-The same holds for `ltspice-convert --check myckt.cir`: any drift
+The same holds for `spice-circuit-lab --check myckt.cir`: any drift
 inside the subckt body would show up as `component count drift` or a
 parser warning.
 
@@ -412,7 +442,7 @@ round-trip for those vendor symbols.
 
 See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for methodology, the
 schemdraw arm, and known failure modes.  Pass rate is not perfect —
-file a [GitHub issue](https://github.com/ksugahar/ltspice-converter/issues)
+file a [GitHub issue](https://github.com/ksugahar/spice-circuit-lab/issues)
 with a failing `.asc` and we'll fix it.
 
 ## Project history & scope
@@ -446,7 +476,7 @@ The benchmark numbers in [docs/BENCHMARKS.md](docs/BENCHMARKS.md)
 report measurements made on LAB-private corpora; you cannot reproduce
 them bit-for-bit without your own corpus, but the converter behaviour
 they describe is exactly what you get from `pip install
-git+https://github.com/ksugahar/ltspice-converter` here.
+git+https://github.com/ksugahar/spice-circuit-lab` here.
 
 ## Test fixtures
 
@@ -479,3 +509,4 @@ Department of Electric and Electronic Engineering, Kindai University
 ## License
 
 MIT — see [LICENSE](LICENSE).
+

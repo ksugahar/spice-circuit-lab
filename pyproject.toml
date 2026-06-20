@@ -3,16 +3,16 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ltspice-converter"
+name = "spice-circuit-lab"
 version = "0.4.0"
-description = "Convert LTspice schematic (.asc) and SPICE netlist (.cir) files to/from schemdraw Python scripts"
+description = "Circuit-aware SPICE/LTspice conversion, validation, and first-pass design helpers"
 readme = "README.md"
 license = "MIT"
 authors = [
     {name = "Mitsutoshi Sugahara", email = "ksugahar@ele.kindai.ac.jp"},
 ]
 requires-python = ">=3.10"
-keywords = ["ltspice", "spice", "netlist", "schematic", "schemdraw", "eda", "converter"]
+keywords = ["ltspice", "spice", "netlist", "schematic", "schemdraw", "eda", "converter", "circuit-design"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
@@ -33,10 +33,13 @@ mcp = ["mcp>=1.0"]
 test = ["pytest>=7.0"]
 
 [project.urls]
-Homepage = "https://github.com/ksugahar/ltspice-converter"
-Issues = "https://github.com/ksugahar/ltspice-converter/issues"
+Homepage = "https://github.com/ksugahar/spice-circuit-lab"
+Issues = "https://github.com/ksugahar/spice-circuit-lab/issues"
 
 [project.scripts]
+mcp-spice-circuit-lab = "ltspice_converter.mcp_server:main"
+spice-circuit-lab = "ltspice_converter.cli:main"
+# Backward-compatible command names.
 mcp-ltspice = "ltspice_converter.mcp_server:main"
 ltspice-convert = "ltspice_converter.cli:main"
 
