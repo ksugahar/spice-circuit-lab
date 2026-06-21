@@ -19,14 +19,16 @@ adjacent helper files or output paths relative to their own directory.
 Generated schemdraw scripts now place vertical source and shunt labels
 away from ground symbols and add a short branch stub before dropping
 shunt components.  This keeps common RC/RLC/filter conversions more
-readable while preserving topology round-trips.
+readable while preserving topology round-trips.  Dense same-node
+source/L/C shunt groups are also spread along a short bus instead of
+being stacked on one coordinate.
 
 ### Quality
 
 Public conversion checks now include CLI smoke paths, `.cir -> .asc ->
 .cir`, `.cir -> schemdraw -> .cir`, `.asc -> .cir -> .asc -> .cir`,
-and generated schemdraw `.py -> .cir` smoke coverage.  Remaining visual
-layout work is concentrated around dense parallel shunt groups.
+and generated schemdraw `.py -> .cir` smoke coverage, plus a regression
+case for dense same-node shunt layout.
 
 ## [0.4.0] — 2026-06-11
 

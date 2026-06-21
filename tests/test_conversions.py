@@ -21,6 +21,7 @@ from ltspice_converter.parser.schemdraw_to_cir import (
 )
 from ltspice_converter.parser.netlist_to_asc import NetlistToAsc
 from ltspice_converter.parser.asc_parser import AscParser, NetlistExtractor
+from ltspice_converter.topology import topology_equivalent
 
 
 # =============================================================================
@@ -169,6 +170,22 @@ with schemdraw.Drawing(show=False) as d:
     recovered = schemdraw_file_to_cir(str(script_path), output_path=str(tmp_path / "out.cir"))
     assert "V1" in recovered
     assert "R1" in recovered
+
+
+def test_dense_same_node_shunts_are_spread_on_a_bus(tmp_path, monkeypatch):
+    """Current source + L/C shunts on one node should not draw on one spot."""
+    monkeypatch.chdir(tmp_path)
+    cir = """* parallel LC
+I1 out 0 AC 1
+L1 out 0 1m
+C1 out 0 100n
+.ac dec 100 1k 100k
+.end"""
+    script = cir_string_to_schemdraw(cir, "parallel_lc")
+    assert script.count("Line().right().length(d.unit/2)") >= 2
+    recovered = schemdraw_script_to_cir(script, "parallel_lc")
+    same, info = topology_equivalent(cir, recovered)
+    assert same, info
 
 
 @pytest.mark.parametrize("name,cir", list(CIRCUITS.items()))

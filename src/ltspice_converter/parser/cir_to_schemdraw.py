@@ -471,14 +471,20 @@ class CirToSchemdraw:
                 last_var = var
 
         # --- 残りのshunt素子 (未配置) ---
-        for comp in shunts:
-            if comp.name in placed:
-                continue
+        remaining_shunts = [comp for comp in shunts if comp.name not in placed]
+        for i, comp in enumerate(remaining_shunts):
             var = _make_var(comp.name)
             elem = _get_schemdraw_element(comp)
             label = _make_label(comp)
+            if len(remaining_shunts) > 1:
+                # Dense same-node source/L/C cases otherwise stack every
+                # shunt at the source output.  Walk along a small bus and
+                # drop each shunt from its own branch point.
+                self.lines.append(f"    d.add(elm.Line().right().length(d.unit/2))")
             self.lines.append(f"    d.add(elm.Dot())")
             self.lines.append(f"    d.push()")
+            if len(remaining_shunts) == 1:
+                self.lines.append(f"    d.add(elm.Line().right().length(d.unit/3))")
             self.lines.append(f"    {var} = d.add({elem}.down().label('{label}', loc='bottom'))")
             self.lines.append(f"    d.add(elm.Ground())")
             self.lines.append(f"    d.pop()")
