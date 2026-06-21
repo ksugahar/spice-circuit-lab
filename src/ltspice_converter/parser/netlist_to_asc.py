@@ -1241,10 +1241,11 @@ class AscGenerator:
 
         placed = layouter.placed_components
         node_positions = layouter.node_positions
-        self._raw_directive_subckt_ids = {
+        local_model_names = self._local_model_names(parser)
+        self._raw_directive_component_ids = {
             id(pc.component)
             for pc in placed
-            if self._should_emit_subckt_as_raw_directive(pc)
+            if self._should_emit_as_raw_directive(pc, local_model_names)
         }
 
         # シートサイズの自動計算
@@ -1270,7 +1271,7 @@ class AscGenerator:
         node_terminal_map: Dict[str, List[Tuple[int, int]]] = {}
         for pc in placed:
             comp = pc.component
-            if self._is_raw_directive_subckt(comp):
+            if self._is_raw_directive_component(comp):
                 continue
             if (comp.comp_type == ComponentType.SUBCIRCUIT
                     and len(comp.extra_nodes) > 0):
@@ -1411,8 +1412,46 @@ class AscGenerator:
         offsets = self._subckt_terminal_offsets(comp, pc.rotation)
         return not offsets or len(offsets) < len(pins)
 
+    @staticmethod
+    def _local_model_names(parser: NetlistParser) -> Set[str]:
+        names: Set[str] = set()
+        for directive in parser.directives:
+            match = re.match(r"\s*\.model\s+(\S+)", directive.text, re.IGNORECASE)
+            if match:
+                names.add(match.group(1).lower())
+        return names
+
+    @staticmethod
+    def _component_model_name(comp: Component) -> str:
+        if not comp.value:
+            return ''
+        return comp.value.split()[0].lower()
+
+    def _should_emit_as_raw_directive(
+        self,
+        pc: PlacedComponent,
+        local_model_names: Set[str],
+    ) -> bool:
+        comp = pc.component
+        if self._should_emit_subckt_as_raw_directive(pc):
+            return True
+        if not comp.raw_line:
+            return False
+        if comp.comp_type not in {
+            ComponentType.BJT,
+            ComponentType.MOSFET,
+            ComponentType.JFET,
+            ComponentType.DIODE,
+        }:
+            return False
+        model_name = self._component_model_name(comp)
+        return bool(model_name and model_name in local_model_names)
+
+    def _is_raw_directive_component(self, comp: Component) -> bool:
+        return id(comp) in getattr(self, '_raw_directive_component_ids', set())
+
     def _is_raw_directive_subckt(self, comp: Component) -> bool:
-        return id(comp) in getattr(self, '_raw_directive_subckt_ids', set())
+        return self._is_raw_directive_component(comp)
 
     # Opampモデル名 → LTSpiceシンボルパス
     OPAMP_SYMBOL_MAP = {
@@ -1434,6 +1473,9 @@ class AscGenerator:
     def _write_symbol(self, pc: PlacedComponent):
         """コンポーネントシンボルを書き出す"""
         comp = pc.component
+        if self._is_raw_directive_component(comp):
+            self.lines.append(f'TEXT {pc.x} {pc.y} Left 2 !{comp.raw_line}')
+            return
         sym_name = self.SYMBOL_MAP.get(comp.comp_type, 'res')
 
         # SUBCIRCUIT (X-class, including unknown vendor symbols): emit the
@@ -1442,9 +1484,6 @@ class AscGenerator:
         # "this was a vendor symbol whose InstName did not start with X";
         # strip it so the InstName reads correctly in the new .asc.
         if comp.comp_type == ComponentType.SUBCIRCUIT:
-            if self._is_raw_directive_subckt(comp):
-                self.lines.append(f'TEXT {pc.x} {pc.y} Left 2 !{comp.raw_line}')
-                return
             inst_name = comp.name
             if inst_name.startswith('X§'):
                 inst_name = inst_name[2:]

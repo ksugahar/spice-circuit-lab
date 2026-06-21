@@ -493,6 +493,30 @@ def test_asc_roundtrip_preserves_unknown_subckt_raw_line():
     assert "X1 in out gain_block Avol=10" in recovered
 
 
+def test_asc_conversion_preserves_local_semiconductor_model_as_raw_line():
+    from ltspice_converter import asc_to_netlist, netlist_to_asc
+
+    netlist = (
+        "* Local semiconductor model should not trigger LTspice library clash\n"
+        "VCC vcc 0 DC 12\n"
+        "RB vcc base 100k\n"
+        "RC vcc col 3.3k\n"
+        "RE emit 0 680\n"
+        "Q1 col base emit 2N3904\n"
+        ".model 2N3904 NPN(Is=6.734f Bf=416.4 Vaf=74.03)\n"
+        ".op\n"
+        ".end\n"
+    )
+    asc = netlist_to_asc(netlist)
+    assert "SYMBOL npn" not in asc
+    assert "!Q1 col base emit 2N3904" in asc
+    assert "!.model 2N3904 NPN(Is=6.734f Bf=416.4 Vaf=74.03)" in asc
+
+    recovered = asc_to_netlist(asc, use_ltspice=False)
+    assert "Q1 col base emit 2N3904" in recovered
+    assert ".model 2N3904 NPN(Is=6.734f Bf=416.4 Vaf=74.03)" in recovered
+
+
 def test_info_text_counts_by_class():
     """info_text() returns per-class component counts for a netlist."""
     from ltspice_converter.cli import info_text
