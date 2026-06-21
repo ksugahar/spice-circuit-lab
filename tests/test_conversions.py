@@ -15,7 +15,10 @@ from pathlib import Path
 import pytest
 
 from ltspice_converter.parser.cir_to_schemdraw import cir_string_to_schemdraw
-from ltspice_converter.parser.schemdraw_to_cir import schemdraw_script_to_cir
+from ltspice_converter.parser.schemdraw_to_cir import (
+    schemdraw_file_to_cir,
+    schemdraw_script_to_cir,
+)
 from ltspice_converter.parser.netlist_to_asc import NetlistToAsc
 from ltspice_converter.parser.asc_parser import AscParser, NetlistExtractor
 
@@ -123,6 +126,49 @@ def test_cir_to_schemdraw_executes(name, cir, tmp_path, monkeypatch):
     script = cir_string_to_schemdraw(cir, name)
     exec_globals: dict = {}
     exec(script, exec_globals)
+
+
+def test_schemdraw_script_context_provides_file_name(tmp_path, monkeypatch):
+    """User schemdraw scripts often use __file__ for nearby assets/outputs."""
+    monkeypatch.chdir(tmp_path)
+    script = """
+from pathlib import Path
+import schemdraw
+import schemdraw.elements as elm
+
+Path(__file__).name
+with schemdraw.Drawing(show=False) as d:
+    d += elm.SourceV().up().label('V1')
+    d += elm.Resistor().right().label('R1')
+    d += elm.Ground()
+"""
+    recovered = schemdraw_script_to_cir(script, "file_context")
+    assert "V1" in recovered
+    assert "R1" in recovered
+
+
+def test_schemdraw_file_context_uses_real_script_path(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    marker = tmp_path / "adjacent.txt"
+    marker.write_text("ok", encoding="utf-8")
+    script_path = tmp_path / "user_script.py"
+    script_path.write_text(
+        """
+from pathlib import Path
+import schemdraw
+import schemdraw.elements as elm
+
+assert (Path(__file__).parent / 'adjacent.txt').read_text(encoding='utf-8') == 'ok'
+with schemdraw.Drawing(show=False) as d:
+    d += elm.SourceV().up().label('V1')
+    d += elm.Resistor().right().label('R1')
+    d += elm.Ground()
+""",
+        encoding="utf-8",
+    )
+    recovered = schemdraw_file_to_cir(str(script_path), output_path=str(tmp_path / "out.cir"))
+    assert "V1" in recovered
+    assert "R1" in recovered
 
 
 @pytest.mark.parametrize("name,cir", list(CIRCUITS.items()))

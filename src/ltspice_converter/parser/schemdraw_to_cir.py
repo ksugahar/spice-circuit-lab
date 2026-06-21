@@ -609,7 +609,11 @@ def schemdraw_to_cir(drawing, title: str = 'schemdraw circuit') -> str:
     return converter.convert(drawing, title)
 
 
-def schemdraw_script_to_cir(script: str, title: str = 'schemdraw circuit') -> str:
+def schemdraw_script_to_cir(
+    script: str,
+    title: str = 'schemdraw circuit',
+    source_path: str | Path | None = None,
+) -> str:
     """Execute a schemdraw script and extract the netlist.
 
     The script should create a Drawing and assign it to a variable 'd' or 'drawing',
@@ -618,16 +622,22 @@ def schemdraw_script_to_cir(script: str, title: str = 'schemdraw circuit') -> st
     Args:
         script: Python source code string that creates a schemdraw Drawing
         title: netlist title line
+        source_path: optional original script path.  When provided, it is
+            exposed as ``__file__`` while the script runs so user scripts can
+            resolve adjacent assets or helper modules.
 
     Returns:
         SPICE netlist string
     """
     import schemdraw
     import schemdraw.elements as elm
+    script_path = Path(source_path) if source_path is not None else Path.cwd() / "<schemdraw-script>"
 
     namespace = {
         'schemdraw': schemdraw,
         'elm': elm,
+        '__file__': str(script_path),
+        '__name__': '__ltspice_converter_schemdraw__',
         '__builtins__': __builtins__,
     }
 
@@ -681,7 +691,7 @@ def schemdraw_file_to_cir(py_path: str, output_path: str = None) -> str:
     script = py_path.read_text(encoding='utf-8')
     title = py_path.stem
 
-    netlist = schemdraw_script_to_cir(script, title)
+    netlist = schemdraw_script_to_cir(script, title, source_path=py_path)
 
     if output_path is None:
         output_path = str(py_path.with_suffix('.cir'))

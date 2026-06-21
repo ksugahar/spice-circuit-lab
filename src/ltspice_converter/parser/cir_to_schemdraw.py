@@ -382,10 +382,10 @@ class CirToSchemdraw:
             label = _make_label(comp)
 
             if i == 0:
-                self.lines.append(f"    {var} = d.add({elem}.up().label('{label}', loc='left'))")
+                self.lines.append(f"    {var} = d.add({elem}.up().label('{label}', loc='top'))")
                 first_source_var = var
             else:
-                self.lines.append(f"    {var} = d.add({elem}.up().label('{label}', loc='left'))")
+                self.lines.append(f"    {var} = d.add({elem}.up().label('{label}', loc='top'))")
             placed.add(comp.name)
 
         if not first_source_var and series:
@@ -479,7 +479,7 @@ class CirToSchemdraw:
             label = _make_label(comp)
             self.lines.append(f"    d.add(elm.Dot())")
             self.lines.append(f"    d.push()")
-            self.lines.append(f"    {var} = d.add({elem}.down().label('{label}', loc='left'))")
+            self.lines.append(f"    {var} = d.add({elem}.down().label('{label}', loc='bottom'))")
             self.lines.append(f"    d.add(elm.Ground())")
             self.lines.append(f"    d.pop()")
             placed.add(comp.name)
@@ -550,9 +550,13 @@ class CirToSchemdraw:
                     selem = _get_schemdraw_element(sc)
                     slabel = _make_label(sc)
                     self.lines.append(f"    d.push()")
+                    # Give each shunt a short branch stub before dropping it.
+                    # Without this, input shunts share the source x-coordinate
+                    # and labels/components visually collide.
+                    self.lines.append(f"    d.add(elm.Line().right().length(d.unit/3))")
                     if i > 0:
                         self.lines.append(f"    d.add(elm.Line().right().length(d.unit/2))")
-                    self.lines.append(f"    {svar} = d.add({selem}.down().label('{slabel}', loc='left'))")
+                    self.lines.append(f"    {svar} = d.add({selem}.down().label('{slabel}', loc='bottom'))")
                     self.lines.append(f"    d.add(elm.Ground())")
                     self.lines.append(f"    d.pop()")
                     placed.add(sc.name)
@@ -564,7 +568,8 @@ class CirToSchemdraw:
             selem = _get_schemdraw_element(sc)
             slabel = _make_label(sc)
             self.lines.append(f"    d.push()")
-            self.lines.append(f"    {svar} = d.add({selem}.down().label('{slabel}', loc='left'))")
+            self.lines.append(f"    d.add(elm.Line().right().length(d.unit/3))")
+            self.lines.append(f"    {svar} = d.add({selem}.down().label('{slabel}', loc='bottom'))")
             self.lines.append(f"    d.add(elm.Ground())")
             self.lines.append(f"    d.pop()")
             placed.add(sc.name)

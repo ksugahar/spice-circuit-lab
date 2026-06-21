@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed (schemdraw script inputs with `__file__`)
+
+`schemdraw_to_netlist()` / `.py -> .cir` conversion now provides a
+`__file__` value while executing schemdraw scripts.  The file-based
+converter passes the real script path, so user scripts can resolve
+adjacent helper files or output paths relative to their own directory.
+
+### Changed (schemdraw label readability)
+
+Generated schemdraw scripts now place vertical source and shunt labels
+away from ground symbols and add a short branch stub before dropping
+shunt components.  This keeps common RC/RLC/filter conversions more
+readable while preserving topology round-trips.
+
+### Quality
+
+Public conversion checks now include CLI smoke paths, `.cir -> .asc ->
+.cir`, `.cir -> schemdraw -> .cir`, `.asc -> .cir -> .asc -> .cir`,
+and generated schemdraw `.py -> .cir` smoke coverage.  Remaining visual
+layout work is concentrated around dense parallel shunt groups.
+
 ## [0.4.0] — 2026-06-11
 
 ### Changed (J1: LTspice's own netlister is now the default extraction backend)
