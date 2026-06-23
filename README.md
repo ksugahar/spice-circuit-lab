@@ -129,6 +129,15 @@ print(seed.to_netlist())
 rules = scl.circuit_knowledge("buck converter")
 for rule in rules["rules"]:
     print("-", rule)
+
+plan = scl.patentability_search_plan(
+    title="snubber-assisted boost converter",
+    features=["boost converter", "switch-node RC snubber", "soft start"],
+    effects=["reduced ringing", "lower overshoot"],
+    domains=["power electronics", "circuit"],
+)
+print(plan["google_patents"])
+print(plan["jplatpat_keywords_ja"])
 ```
 
 ## Command-line tool
@@ -247,9 +256,13 @@ Exposes nine tools:
 | `compare_topology(netlist_a, netlist_b)` | Node-rename-invariant connectivity diff of two netlists. Returns `{equivalent, ...}`. |
 | `circuit_knowledge(topic)` | Compact public circuit-design and conversion rules by topic. |
 | `buck_seed(vin_v, vout_v, iout_a, fsw_hz?, ripple_fraction?)` | First-pass asynchronous buck sizing plus an LTspice-ready open-loop netlist. |
+| `patentability_search_plan(title, features, effects?, domains?, include_japanese?)` | Non-legal prior-art search plan for Google Scholar, Google Patents, J-PlatPat, and web searches. |
 
 Typical agent loop: generate netlist → `check_circuit(..., 'cir')` →
 if `warnings` non-empty, fix and re-check → only ship when clean.
+
+`patentability_search_plan` is only a search-query and report-planning aid.
+It does not decide patentability and is not a legal opinion.
 
 `compare_topology` answers a different question — *"did my edit change
 the wiring?"*  It is invariant to node renaming and benign R/C/L pin

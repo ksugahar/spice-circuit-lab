@@ -13,6 +13,7 @@ Public API
 - topology_equivalent(netlist_a, netlist_b) -> (bool, info)
 - circuit_knowledge(topic) -> dict
 - buck_seed(vin_v, vout_v, iout_a, fsw_hz=...) -> BuckSeed
+- patentability_search_plan(title, features, effects, domains) -> dict
 
 CLI / MCP server
 ----------------
@@ -28,6 +29,7 @@ from .conversion import (
 )
 from .topology import topology_signature, topology_equivalent
 from .knowledge import circuit_knowledge, buck_seed, BuckSeed
+from .patentability import patentability_search_plan
 
 __all__ = [
     "netlist_to_schemdraw",
@@ -39,6 +41,7 @@ __all__ = [
     "circuit_knowledge",
     "buck_seed",
     "BuckSeed",
+    "patentability_search_plan",
 ]
 
 __version__ = "0.4.0"

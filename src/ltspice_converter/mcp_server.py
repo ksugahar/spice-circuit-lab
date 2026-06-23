@@ -19,6 +19,7 @@ from . import conversion
 from . import cli as _cli
 from .knowledge import buck_seed as _buck_seed
 from .knowledge import circuit_knowledge as _circuit_knowledge
+from .patentability import patentability_search_plan as _patentability_search_plan
 
 
 mcp = FastMCP("mcp-spice-circuit-lab")
@@ -247,6 +248,30 @@ def buck_seed(
         ripple_fraction=ripple_fraction,
     )
     return {"calculations": seed.to_dict(), "netlist": seed.to_netlist()}
+
+
+@mcp.tool()
+def patentability_search_plan(
+    title: str,
+    features: List[str],
+    effects: Optional[List[str]] = None,
+    domains: Optional[List[str]] = None,
+    include_japanese: bool = True,
+) -> dict:
+    """Create prior-art search queries for patentability triage.
+
+    This is a non-legal search aid for circuit or engineering ideas.  It
+    prepares Google Scholar, Google Patents, J-PlatPat, and web query
+    strings plus report questions.  A human or agent must still inspect
+    the references before judging novelty or inventive step.
+    """
+    return _patentability_search_plan(
+        title=title,
+        features=features,
+        effects=effects or [],
+        domains=domains or [],
+        include_japanese=include_japanese,
+    )
 
 
 def main() -> int:

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (prior-art search planning)
+
+Added `patentability_search_plan()`, also exposed through MCP, to create
+public prior-art search plans for circuit ideas.  It prepares Google
+Scholar, Google Patents, J-PlatPat, and web query strings plus triage
+questions for novelty / inventive-step review.  It is a non-legal search
+aid, not a patentability opinion.
+
 ### Fixed (schemdraw script inputs with `__file__`)
 
 `schemdraw_to_netlist()` / `.py -> .cir` conversion now provides a

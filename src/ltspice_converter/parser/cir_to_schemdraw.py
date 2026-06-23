@@ -480,7 +480,7 @@ class CirToSchemdraw:
                 # Dense same-node source/L/C cases otherwise stack every
                 # shunt at the source output.  Walk along a small bus and
                 # drop each shunt from its own branch point.
-                self.lines.append(f"    d.add(elm.Line().right().length(d.unit/2))")
+                self.lines.append(f"    d.add(elm.Line().right().length(d.unit*0.85))")
             self.lines.append(f"    d.add(elm.Dot())")
             self.lines.append(f"    d.push()")
             if len(remaining_shunts) == 1:
@@ -561,7 +561,7 @@ class CirToSchemdraw:
                     # and labels/components visually collide.
                     self.lines.append(f"    d.add(elm.Line().right().length(d.unit/3))")
                     if i > 0:
-                        self.lines.append(f"    d.add(elm.Line().right().length(d.unit/2))")
+                        self.lines.append(f"    d.add(elm.Line().right().length(d.unit*0.85))")
                     self.lines.append(f"    {svar} = d.add({selem}.down().label('{slabel}', loc='bottom'))")
                     self.lines.append(f"    d.add(elm.Ground())")
                     self.lines.append(f"    d.pop()")

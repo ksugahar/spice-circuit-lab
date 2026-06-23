@@ -180,9 +180,9 @@ I1 out 0 AC 1
 L1 out 0 1m
 C1 out 0 100n
 .ac dec 100 1k 100k
-.end"""
+    .end"""
     script = cir_string_to_schemdraw(cir, "parallel_lc")
-    assert script.count("Line().right().length(d.unit/2)") >= 2
+    assert script.count("Line().right().length(d.unit*0.85)") >= 2
     recovered = schemdraw_script_to_cir(script, "parallel_lc")
     same, info = topology_equivalent(cir, recovered)
     assert same, info
