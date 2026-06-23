@@ -188,6 +188,42 @@ C1 out 0 100n
     assert same, info
 
 
+def test_generated_schemdraw_labels_use_compact_single_line(tmp_path, monkeypatch):
+    """Generated labels should avoid cramped name/value two-line text."""
+    monkeypatch.chdir(tmp_path)
+    cir = """* compact labels
+V1 in 0 AC 1
+R1 in out 1k
+C1 out 0 1u
+.end"""
+    script = cir_string_to_schemdraw(cir, "compact_labels")
+    assert "label('R1 1k')" in script
+    assert "label('C1 1u'" in script
+    assert "R1\\n1k" not in script
+    recovered = schemdraw_script_to_cir(script, "compact_labels")
+    same, info = topology_equivalent(cir, recovered)
+    assert same, info
+
+
+def test_schemdraw_compact_component_labels_roundtrip(tmp_path, monkeypatch):
+    """Hand-written compact labels like ``RLOAD 1k`` keep name and value."""
+    monkeypatch.chdir(tmp_path)
+    script = """
+import schemdraw
+import schemdraw.elements as elm
+
+with schemdraw.Drawing(show=False) as d:
+    V1 = d.add(elm.SourceV().up().label('V1 AC 1', loc='left'))
+    RLOAD = d.add(elm.Resistor().right().label('RLOAD 1k'))
+    C1 = d.add(elm.Capacitor().down().label('C1 1u', loc='left'))
+    d.add(elm.Ground())
+"""
+    recovered = schemdraw_script_to_cir(script, "compact_hand_labels")
+    assert "V1 " in recovered and "AC 1" in recovered
+    assert "RLOAD " in recovered and " 1k" in recovered
+    assert "C1 " in recovered and " 1u" in recovered
+
+
 @pytest.mark.parametrize("name,cir", list(CIRCUITS.items()))
 def test_schemdraw_roundtrip_nodes(name, cir, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)

@@ -141,6 +141,13 @@ def _parse_label(element) -> Tuple[Optional[str], Optional[str]]:
         return parts[0].strip(), '\n'.join(p.strip() for p in parts[1:])
     elif len(parts) == 1:
         text = parts[0].strip()
+        tokens = text.split()
+        if len(tokens) >= 2:
+            etype = element.__class__.__name__
+            expected_prefix = SCHEMDRAW_TO_SPICE.get(etype, '')
+            first = tokens[0]
+            if expected_prefix and first.upper().startswith(expected_prefix):
+                return first, ' '.join(tokens[1:])
         # プレフィクス+数字の場合は名前のみ
         if re.match(r'^[A-Za-z]+\d+$', text):
             return text, None

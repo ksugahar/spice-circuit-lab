@@ -146,7 +146,7 @@ def _make_label(comp: Component) -> str:
         if len(val) > 20:
             val = val[:17] + '...'
         parts.append(_sanitize_label(val))
-    return '\\n'.join(parts)
+    return ' '.join(parts)
 
 
 def _node_pair_key(comp: Component) -> Tuple[str, str]:

@@ -47,7 +47,15 @@ class PriorArtSearchPlan:
     disclaimer: str
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        data = asdict(self)
+        data["query_sets"] = {
+            "google_scholar": self.google_scholar,
+            "google_patents": self.google_patents,
+            "jplatpat_keywords_en": self.jplatpat_keywords_en,
+            "jplatpat_keywords_ja": self.jplatpat_keywords_ja,
+            "web": self.web,
+        }
+        return data
 
 
 def patentability_search_plan(

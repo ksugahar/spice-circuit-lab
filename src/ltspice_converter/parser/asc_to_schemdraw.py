@@ -442,7 +442,7 @@ class AscToSchemdraw:
             parts.append(sym.inst_name)
         if sym.value:
             parts.append(sym.value)
-        return '\\n'.join(parts) if parts else ''
+        return ' '.join(parts) if parts else ''
 
     def _make_var_name(self, inst_name: str) -> str:
         """インスタンス名からPython変数名を生成"""

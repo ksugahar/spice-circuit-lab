@@ -136,7 +136,7 @@ plan = scl.patentability_search_plan(
     effects=["reduced ringing", "lower overshoot"],
     domains=["power electronics", "circuit"],
 )
-print(plan["google_patents"])
+print(plan["query_sets"]["google_patents"])
 print(plan["jplatpat_keywords_ja"])
 ```
 

@@ -40,6 +40,8 @@ def test_patentability_search_plan_expands_circuit_queries():
 
     assert "google_scholar" in plan
     assert "google_patents" in plan
+    assert plan["query_sets"]["google_scholar"] == plan["google_scholar"]
+    assert plan["query_sets"]["web"] == plan["web"]
     assert "jplatpat_keywords_ja" in plan
     assert any("boost converter" in query for query in plan["google_scholar"])
     assert "昇圧" in plan["jplatpat_keywords_ja"]

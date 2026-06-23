@@ -14,6 +14,8 @@ public prior-art search plans for circuit ideas.  It prepares Google
 Scholar, Google Patents, J-PlatPat, and web query strings plus triage
 questions for novelty / inventive-step review.  It is a non-legal search
 aid, not a patentability opinion.
+The returned dict also includes a `query_sets` grouping for callers that
+want to iterate database-specific query lists uniformly.
 
 ### Fixed (schemdraw script inputs with `__file__`)
 
@@ -30,6 +32,11 @@ shunt components.  This keeps common RC/RLC/filter conversions more
 readable while preserving topology round-trips.  Dense same-node
 source/L/C shunt groups are also spread along a short bus instead of
 being stacked on one coordinate.
+
+Generated schemdraw labels now use compact single-line name/value text
+(`R1 1k`) instead of cramped two-line labels (`R1\n1k`).  The reverse
+converter also parses this compact label form so hand-authored
+schemdraw scripts keep both component names and values.
 
 ### Quality
 
